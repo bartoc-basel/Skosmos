@@ -6,9 +6,10 @@ class ModelTest extends PHPUnit\Framework\TestCase
   private $model;
 
   protected function setUp() {
+    putenv("LANGUAGE=en_GB.utf8");
     putenv("LC_ALL=en_GB.utf8");
     setlocale(LC_ALL, 'en_GB.utf8');
-    $this->model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $this->model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $this->params = $this->getMockBuilder('ConceptSearchParameters')->disableOriginalConstructor()->getMock();
     $this->params->method('getVocabIds')->will($this->returnValue(array('test')));
     $this->params->method('getVocabs')->will($this->returnValue(array($this->model->getVocabulary('test'))));
@@ -23,7 +24,7 @@ class ModelTest extends PHPUnit\Framework\TestCase
    */
   public function testConstructorWithConfig()
   {
-    new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    new Model(new GlobalConfig('/../tests/testconfig.ttl'));
   }
 
   /**
@@ -91,7 +92,7 @@ class ModelTest extends PHPUnit\Framework\TestCase
   /**
    * @covers Model::getVocabularyByGraph
    * @expectedException \Exception
-   * @expectedExceptionMessage no vocabulary found for graph http://no/address and endpoint http://localhost:3030/ds/sparql
+   * @expectedExceptionMessage no vocabulary found for graph http://no/address and endpoint http://localhost:13030/ds/sparql
    */
   public function testGetVocabularyByInvalidGraphUri() {
     $vocab = $this->model->getVocabularyByGraph('http://no/address');
@@ -161,9 +162,13 @@ class ModelTest extends PHPUnit\Framework\TestCase
 
   /**
    * @covers Model::searchConcepts
-   * @expectedException PHPUnit\Framework\Error\Error
    */
   public function testSearchWithNoParams() {
+    if (PHP_VERSION_ID >= 70100) {
+      $this->expectException(ArgumentCountError::class);
+    } else {
+      $this->expectException(PHPUnit\Framework\Error\Error::class);
+    }
     $result = $this->model->searchConcepts();
   }
 
@@ -292,7 +297,7 @@ class ModelTest extends PHPUnit\Framework\TestCase
   }
 
   /**
-   * Test for issue #387: make sure namespaces defined in vocabularies.ttl are used for RDF export
+   * Test for issue #387: make sure namespaces defined in config.ttl are used for RDF export
    * @covers Model::getRDF
    */
 
@@ -493,7 +498,7 @@ test:ta126
    * Issue: https://github.com/NatLibFi/Skosmos/pull/419
    */
   public function testGetRDFShouldNotIncludeExtraBlankNodesFromLists() {
-    $model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $result = $model->getRDF('test', 'http://www.skosmos.skos/test/ta125', 'text/turtle');
     $resultGraph = new EasyRdf\Graph();
     $resultGraph->parse($result, "turtle");

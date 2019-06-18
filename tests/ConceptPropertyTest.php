@@ -5,14 +5,14 @@ class ConceptPropertyTest extends PHPUnit\Framework\TestCase
   private $model;
 
   protected function setUp() {
-    require_once 'testconfig.inc';
+    putenv("LANGUAGE=en_GB.utf8");
     putenv("LC_ALL=en_GB.utf8");
     setlocale(LC_ALL, 'en_GB.utf8');
     bindtextdomain('skosmos', 'resource/translations');
     bind_textdomain_codeset('skosmos', 'UTF-8');
     textdomain('skosmos');
 
-    $this->model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $this->model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
   }
 
   /**
@@ -81,9 +81,9 @@ class ConceptPropertyTest extends PHPUnit\Framework\TestCase
     $concepts = $vocab->getConceptInfo('http://www.skosmos.skos/test/ta1', 'en');
     $concept = $concepts[0];
     $props = $concept->getProperties();
-    $prevlabel;
+    $prevlabel = null;
     foreach($props['skos:narrower'] as $val) {
-      $label = is_string($val->getLabel()) ? $val->getLabel() : $val->getLabel()-getValue();
+      $label = is_string($val->getLabel()) ? $val->getLabel() : $val->getLabel()->getValue();
       if ($prevlabel)
         $this->assertEquals(1, strnatcmp($prevlabel, $label));
       $prevlabel = $label;

@@ -319,6 +319,7 @@ $(function() { // DOCUMENT READY
         $.ajaxQ.abortAll();
         $('.active').removeClass('active');
         $('#alpha').addClass('active');
+        alpha_complete = false;
         $('.sidebar-grey').empty().prepend(spinner);
         var targetUrl = event.target.href;
         $.ajax({
@@ -387,7 +388,8 @@ $(function() { // DOCUMENT READY
       }
       var uri = $('.uri-input-box').html();
       var base_href = $('base').attr('href'); // see #315, #633
-      var redirectUrl = base_href + vocab + '/' + lang + '/page/?uri=' + uri;
+      var clangIfSet = clang !== lang ? "&clang=" + clang : ""; // see #714
+      var redirectUrl = base_href + vocab + '/' + lang + '/page/?uri=' + uri + clangIfSet;
       window.location.replace(encodeURI(redirectUrl));
       return false;
     }
@@ -774,7 +776,7 @@ $(function() { // DOCUMENT READY
       var emailMessageVal = $("#message").val();
       var emailAddress = $("#email").val();
       var requiredFields = true;
-      if (emailAddress === '' || emailAddress.indexOf('@') === -1) {
+      if (emailAddress !== '' && emailAddress.indexOf('@') === -1) {
         $("#email").addClass('missing-value');
         requiredFields = false;
       }
@@ -810,7 +812,7 @@ $(function() { // DOCUMENT READY
       alpha_complete = true;
       $('.alphabetical-search-results').append($loading);
       var parameters = $.param({'offset' : 250, 'clang': content_lang});
-      var letter = '/' + $('.pagination > .active > a')[0].innerHTML;
+      var letter = '/' + ($('.pagination > .active')[0] ? $('.pagination > .active > a')[0].innerHTML : $('.pagination > li > a')[0].innerHTML);
       $.ajax({
         url : vocab + '/' + lang + '/index' + letter,
         data : parameters,

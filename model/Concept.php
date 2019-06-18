@@ -514,7 +514,16 @@ class Concept extends VocabularyDataObject
                 // note that this imply that the property has an rdf:type declared for the query to work
                 if(!$proplabel) {
                     $envLangLabels = $this->model->getDefaultSparql()->queryLabel($longUri, $this->getEnvLang());
-                    $proplabel = ($envLangLabels)?$envLangLabels[$this->getEnvLang()]:$this->model->getDefaultSparql()->queryLabel($longUri, '')[''];
+                    
+                    $defaultPropLabel = $this->model->getDefaultSparql()->queryLabel($longUri, '');
+
+					if($envLangLabels) {
+						$proplabel = $envLangLabels[$this->getEnvLang()];
+                    } else {
+						if($defaultPropLabel) {
+							$proplabel = $defaultPropLabel[''];
+						}
+					}
                 }
 
                 // look for superproperties in the current graph
@@ -533,7 +542,8 @@ class Concept extends VocabularyDataObject
                 if ($superprop) {
                     $superprop = EasyRdf\RdfNamespace::shorten($superprop) ? EasyRdf\RdfNamespace::shorten($superprop) : $superprop;
                 }
-                $propobj = new ConceptProperty($prop, $proplabel, $superprop);
+                $sort_by_notation = $this->vocab->getConfig()->sortByNotation();
+                $propobj = new ConceptProperty($prop, $proplabel, $superprop, $sort_by_notation);
 
                 if ($propobj->getLabel() !== null) {
                     // only display properties for which we have a label
@@ -723,50 +733,51 @@ class Concept extends VocabularyDataObject
      */
     public function getGroupProperties()
     {
-        return $this->getReverseResources(false);
+        return $this->getCollections(false);
     }
 
     /**
      * Gets the groups/arrays the concept belongs to.
      */
-    public function getReverseResources($includeArrays) {
+    private function getCollections($includeArrays) {
         $groups = array();
-        $reverseResources = $this->graph->resourcesMatching('skos:member', $this->resource);
-        if (isset($reverseResources)) {
+        $collections = $this->graph->resourcesMatching('skos:member', $this->resource);
+        if (isset($collections)) {
             $arrayClassURI = $this->vocab !== null ? $this->vocab->getConfig()->getArrayClassURI() : null;
             $arrayClass = $arrayClassURI !== null ? EasyRdf\RdfNamespace::shorten($arrayClassURI) : null;
             $superGroups = $this->resource->all('isothes:superGroup');
             $superGroupUris = array_map(function($obj) { return $obj->getUri(); }, $superGroups);
-            foreach ($reverseResources as $reverseResource) {
-                if (in_array($arrayClass, $reverseResource->types()) === $includeArrays) {
+            foreach ($collections as $collection) {
+                if (in_array($arrayClass, $collection->types()) === $includeArrays) {
                     // not adding the memberOf if the reverse resource is already covered by isothes:superGroup see issue #433
-                    if (in_array($reverseResource->getUri(), $superGroupUris)) {
+                    if (in_array($collection->getUri(), $superGroupUris)) {
                         continue;
                     }
-                    $property = in_array($arrayClass, $reverseResource->types()) ? "skosmos:memberOfArray" : "skosmos:memberOf";
-                    $collLabel = $reverseResource->label($this->clang) ? $reverseResource->label($this->clang) : $reverseResource->label();
+                    $property = in_array($arrayClass, $collection->types()) ? "skosmos:memberOfArray" : "skosmos:memberOf";
+                    $collLabel = $collection->label($this->clang) ? $collection->label($this->clang) : $collection->label();
                     if ($collLabel) {
                         $collLabel = $collLabel->getValue();
                     }
 
-                    $groups[$collLabel] = new ConceptPropertyValue($this->model, $this->vocab, $reverseResource, $property, $this->clang);
-                    ksort($groups);
-                    $super = $this->graph->resourcesMatching('skos:member', $reverseResource);
-                    while (isset($super) && !empty($super)) {
+                    $group = new ConceptPropertyValue($this->model, $this->vocab, $collection, $property, $this->clang);
+                    $groups[$collLabel] = array($group);
+
+                    $res = $collection;
+                    while($super = $this->graph->resourcesMatching('skos:member', $res)) {
                         foreach ($super as $res) {
                             $superprop = new ConceptPropertyValue($this->model, $this->vocab, $res, 'skosmos:memberOfSuper', $this->clang);
-                            array_unshift($groups, $superprop);
-                            $super = $this->graph->resourcesMatching('skos:member', $res);
+                            array_unshift($groups[$collLabel], $superprop);
                         }
                     }
                 }
             }
         }
+        uksort($groups, 'strcoll');
         return $groups;
     }
 
     public function getArrayProperties() {
-        return $this->getReverseResources(true);
+        return $this->getCollections(true);
     }
 
     /**

@@ -78,7 +78,7 @@
             {% if propval.uri and propval.type != 'rdf:type' %} {# resources with URI #}
               {% if propval.label %}
                 {% if propval.isExternal %}
-                <a href="{{ propval.uri }}">{{ propval.uri }}</a>
+                <a href="{{ propval.uri | link_url(propval.exvocab, request.lang, 'page', request.contentLang) }}">{{ propval.label }}</a> ({{ propval.vocabname }})
                 {% else %}
                 {% if propval.isReified %} {# e.g. skos:definition's with resource values #}
                 <span class="versal reified-property-value"><img src="resource/pics/about.png">{% if propval.notation %}<span class="versal">{{ propval.notation }} </span>{% endif %} {{ propval.label(request.contentLang) }}</span>
@@ -99,7 +99,7 @@
               {% endif %}
             {% elseif property.type == 'rdf:type' %}<p>{{ propval.label|trans }}</p>
             {% else %} {# Literals (no URI), eg. alternative labels as properties #}
-                {% if propval.lang == request.contentLang or propval.lang == null or not request.contentLang and propval.lang == request.lang %}{% if propval.hasXlProperties %}<span class="reified-property-value xl-label"><img src="resource/pics/about.png"></span><div class="reified-tooltip">{% for key, val in propval.getXlProperties %}{% if key != 'rdf:type' and key != 'skosxl:literalForm' and val != '' %}<p>{{ key|trans }}: <span class="versal">{{ val }}</span></p>{% endif %}{% endfor %}</div>{% endif %}<p{% if property.type == 'skos:altLabel' %} class="replaced"{% endif %}>{% if propval.containsHtml %}{{ propval.label|raw }}{% else %}{{ propval.label }}{% endif %}{% if propval.lang and (request.contentLang and propval.lang != request.contentLang or explicit_langcodes) %} ({{ propval.lang }}){% endif %}</p>
+                {% if propval.lang == request.contentLang or propval.lang == null or not request.contentLang and propval.lang == request.lang %}{% if propval.hasXlProperties %}<span class="reified-property-value xl-label"><img src="resource/pics/about.png"></span><div class="reified-tooltip">{% for key, val in propval.getXlProperties %}{% if key != 'rdf:type' and key != 'skosxl:literalForm' and val != '' %}<p>{{ key|trans }}: <span class="versal">{{ val }}</span></p>{% endif %}{% endfor %}</div>{% endif %}<span{% if property.type == 'skos:altLabel' %} class="replaced"{% endif %}>{% if propval.containsHtml %}{{ propval.label|raw }}{% else %}{{ propval.label }}{% endif %}{% if propval.lang and (request.contentLang and propval.lang != request.contentLang or explicit_langcodes) %} ({{ propval.lang }}){% endif %}</span>
                 {% endif %}
             {% endif %}
             </li>
@@ -114,12 +114,13 @@
         <div class="property-label"><span class="versal property-click" title="{% trans "skosmos:memberOf_help" %}" >{{ 'skosmos:memberOf'|trans|upper }}</span></div>
         <div class="property-value-column"><div class="property-value-wrapper">
           <ul>
-          {% for group in concept.groupProperties %}
-              {% if (group.type == 'skosmos:memberOfSuper' and not superFound) or (group.type == 'skosmos:memberOf' and not superFound) %}<li>{% endif %}
+          {% for grouppath in concept.groupProperties %}
+              <li>
+              {% for group in grouppath %}
                 <a class="versal" href="{{ group.uri | link_url(group.vocab,request.lang,'page',request.contentLang) }}">{% if group.notation %}<span class="versal">{{ group.notation }}</span>{% endif %}{{ group.label(request.contentLang) }}</a>
-                {% if group.type == 'skosmos:memberOfSuper' %}<span class="versal"> &#62; </span>{% endif %}
-              {% if group.type == 'skosmos:memberOf' or loop.last %}</li>{% endif %}
-              {% if group.type == 'skosmos:memberOfSuper' %}{% set superFound = true %}{% elseif group.type == 'skosmos:memberOf' and superFound %}{% set superFound = false %}{% endif %}
+                {% if not loop.last %}<span class="versal"> &#62; </span>{% endif %}
+              {% endfor %}
+              </li>
           {% endfor %}
           </ul>
         </div></div>
@@ -130,11 +131,13 @@
         <div class="property-label"><span class="versal property-click" title="{% trans "skosmos:memberOfArray_help" %}" >{{ 'skosmos:memberOfArray'|trans|upper }}</span></div>
         <div class="property-value-column"><div class="property-value-wrapper">
           <ul>
-          {% for group in concept.arrayProperties %}
-            {% if group.type == 'skosmos:memberOfArray' %}
+          {% for grouppath in concept.arrayProperties %}
+            {% for group in grouppath %}
+              {% if group.type == 'skosmos:memberOfArray' %}
                 <li><a href="{{ group.uri | link_url(group.vocab,request.lang,'page',request.contentLang) }}">{% if group.notation %}<span class="versal">{{ group.notation }}</span>{% endif %}{{ group.label(request.contentLang) }}</a></li>
-            {% else %}
-            {% endif %}
+              {% else %}
+              {% endif %}
+            {% endfor %}
           {% endfor %}
           </ul>
         </div></div>

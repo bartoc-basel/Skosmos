@@ -7,14 +7,14 @@ class ConceptPropertyValueLiteralTest extends PHPUnit\Framework\TestCase
   private $vocab;
 
   protected function setUp() {
-    require_once 'testconfig.inc';
+    putenv("LANGUAGE=en_GB.utf8");
     putenv("LC_ALL=en_GB.utf8");
     setlocale(LC_ALL, 'en_GB.utf8');
     bindtextdomain('skosmos', 'resource/translations');
     bind_textdomain_codeset('skosmos', 'UTF-8');
     textdomain('skosmos');
 
-    $this->model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $this->model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $this->vocab = $this->model->getVocabulary('test');
     $results = $this->vocab->getConceptInfo('http://www.skosmos.skos/test/ta112', 'en');
     $this->concept = reset($results);
@@ -52,7 +52,7 @@ class ConceptPropertyValueLiteralTest extends PHPUnit\Framework\TestCase
 
   /**
    * @covers ConceptPropertyValueLiteral::getLabel
-   * @expectedException PHPUnit\Framework\Error\Error
+   * @expectedException PHPUnit\Framework\Error\Warning
    */
   public function testGetLabelThatIsABrokenDate() {
     $vocab = $this->model->getVocabulary('dates');

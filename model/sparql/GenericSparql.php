@@ -60,6 +60,26 @@ class GenericSparql {
     }
     
     /**
+     * Returns prefix-definitions for a query
+     *
+     * @param string $query
+     * @return string
+    */
+    protected function generateQueryPrefixes($query)
+    {
+        // Check for undefined prefixes
+        $prefixes = '';
+        foreach (EasyRdf\RdfNamespace::namespaces() as $prefix => $uri) {
+            if (strpos($query, "{$prefix}:") !== false and
+                strpos($query, "PREFIX {$prefix}:") === false
+            ) {
+                $prefixes .= "PREFIX {$prefix}: <{$uri}>\n";
+            }
+        }
+        return $prefixes;
+    }
+
+    /**
      * Execute the SPARQL query using the SPARQL client, logging it as well.
      * @param string $query SPARQL query to perform
      * @return object query result
@@ -67,7 +87,7 @@ class GenericSparql {
     protected function query($query) {
         $queryId = sprintf("%05d", rand(0, 99999));
         $logger = $this->model->getLogger();
-        $logger->info("[qid $queryId] SPARQL query:\n$query\n");
+        $logger->info("[qid $queryId] SPARQL query:\n" . $this->generateQueryPrefixes($query) . "\n$query\n");
         $starttime = microtime(true);
         $result = $this->client->query($query);
         $elapsed = intval(round((microtime(true) - $starttime) * 1000));
@@ -443,7 +463,7 @@ EOQ;
         $conceptArray = array();
         foreach ($uris as $index => $uri) {
             $conc = $result->resource($uri);
-            $vocab = sizeof($vocabs) == 1 ? $vocabs[0] : $vocabs[$index];
+            $vocab = (isset($vocabs) && sizeof($vocabs) == 1) ? $vocabs[0] : $vocabs[$index];
             $conceptArray[] = new Concept($this->model, $vocab, $conc, $result, $clang);
         }
         return $conceptArray;
@@ -748,7 +768,7 @@ EOQ;
             }
         }
 
-        return implode(' UNION ', $typePatterns);;
+        return implode(' UNION ', $typePatterns);
     }
 
     /**
@@ -870,8 +890,8 @@ EOF;
     {
         $valuesProp = $this->formatValues('?prop', $props);
         $textcond = $this->generateConceptSearchQueryCondition($term, $searchLang);
-        $rawterm = str_replace('\\', '\\\\', str_replace('*', '', $term));
-        
+
+        $rawterm = str_replace(array('\\', '*', '"'), array('\\\\', '', '\"'), $term);
         // graph clause, if necessary
         $graphClause = $filterGraph != '' ? 'GRAPH ?graph' : '';
 
@@ -1276,7 +1296,7 @@ EOQ;
      */
     private function generateFirstCharactersQuery($lang, $classes) {
         $fcl = $this->generateFromClause();
-        $classes = (sizeof($classes) > 0) ? $classes : array('http://www.w3.org/2004/02/skos/core#Concept');
+        $classes = (isset($classes) && sizeof($classes) > 0) ? $classes : array('http://www.w3.org/2004/02/skos/core#Concept');
         $values = $this->formatValues('?type', $classes, 'uri');
         $query = <<<EOQ
 SELECT DISTINCT (ucase(str(substr(?label, 1, 1))) as ?l) $fcl WHERE {
@@ -1866,7 +1886,6 @@ EOQ;
                 $ret[$uri]['exact'] = $row->exact->getUri();
             }
             if (isset($row->tops)) {
-               $topConceptsList=array();
                $topConceptsList=explode(" ", $row->tops->getValue());
                // sort to garantee an alphabetical ordering of the URI
                sort($topConceptsList);

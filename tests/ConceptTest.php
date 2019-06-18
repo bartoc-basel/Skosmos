@@ -8,13 +8,14 @@ class ConceptTest extends PHPUnit\Framework\TestCase
   private $cbdGraph;
 
   protected function setUp() {
+    putenv("LANGUAGE=en_GB.utf8");
     putenv("LC_ALL=en_GB.utf8");
     setlocale(LC_ALL, 'en_GB.utf8');
     bindtextdomain('skosmos', 'resource/translations');
     bind_textdomain_codeset('skosmos', 'UTF-8');
     textdomain('skosmos');
 
-    $this->model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $this->model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $this->vocab = $this->model->getVocabulary('test');
     $results = $this->vocab->getConceptInfo('http://www.skosmos.skos/test/ta112', 'en');
     $this->concept = reset($results);
@@ -179,9 +180,9 @@ class ConceptTest extends PHPUnit\Framework\TestCase
     $results = $this->vocab->getConceptInfo('http://www.skosmos.skos/test/ta1', 'en');
     $concept = reset($results);
     $props = $concept->getProperties();
-    $prevlabel;
+    $prevlabel = null;
     foreach($props['skos:narrower'] as $val) {
-      $label = is_string($val->getLabel()) ? $val->getLabel() : $val->getLabel()-getValue();
+      $label = is_string($val->getLabel()) ? $val->getLabel() : $val->getLabel()->getValue();
       if ($prevlabel)
         $this->assertEquals(1, strnatcmp($prevlabel, $label));
       $prevlabel = $label;
@@ -323,7 +324,7 @@ class ConceptTest extends PHPUnit\Framework\TestCase
    */
   public function testGetLabelWhenNull()
   {
-    $model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $vocab = $model->getVocabulary('test');
     $concept = $vocab->getConceptInfo("http://www.skosmos.skos/test/ta120", "en");
     $this->assertEquals(null, $concept[0]->getLabel());
@@ -344,11 +345,11 @@ class ConceptTest extends PHPUnit\Framework\TestCase
   /**
    * @covers Concept::getArrayProperties
    * @covers Concept::getGroupProperties
-   * @covers Concept::getReverseResources
+   * @covers Concept::getCollections
    */
   public function testGetGroupProperties()
   {
-    $model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $vocab = $model->getVocabulary('groups');
     $concept = $vocab->getConceptInfo("http://www.skosmos.skos/groups/ta111", "en");
     $arrays = $concept[0]->getArrayProperties();
@@ -360,15 +361,30 @@ class ConceptTest extends PHPUnit\Framework\TestCase
 
   /**
    * @covers Concept::getGroupProperties
-   * @covers Concept::getReverseResources
+   * @covers Concept::getCollections
    */
   public function testGetGroupPropertiesWithDuplicatedInformationFilteredOut()
   {
-    $model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $vocab = $model->getVocabulary('dupgroup');
     $concept = $vocab->getConceptInfo("http://www.skosmos.skos/dupgroup/c1", "en");
     $groups = $concept[0]->getGroupProperties();
     $this->assertEquals(0, sizeof($groups));
+  }
+
+  /**
+   * @covers Concept::getGroupProperties
+   * @covers Concept::getCollections
+   */
+  public function testGetGroupPropertiesWithHierarchy()
+  {
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
+    $vocab = $model->getVocabulary('dupgroup');
+    $concept = $vocab->getConceptInfo("http://www.skosmos.skos/dupgroup/ta111", "en");
+    $groups = $concept[0]->getGroupProperties();
+    $this->assertEquals(2, sizeof($groups));
+    $this->assertArrayHasKey("Animalia", $groups);
+    $this->assertArrayHasKey("Biology", $groups);
   }
 
   /**
@@ -380,7 +396,7 @@ class ConceptTest extends PHPUnit\Framework\TestCase
    */
   public function testGetPropertiesWithNarrowersPartOfACollection()
   {
-    $model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $vocab = $model->getVocabulary('groups');
     $concept = $vocab->getConceptInfo("http://www.skosmos.skos/groups/ta1", "en");
     $props = $concept[0]->getProperties();

@@ -1,34 +1,118 @@
 <?php
 
 /**
- * GlobalConfig provides access to the Skosmos configuration in config.inc.
+ * Setting some often needed namespace prefixes
  */
-class GlobalConfig {
-    private $languages;
+EasyRdf\RdfNamespace::set('skosmos', 'http://purl.org/net/skosmos#');
+EasyRdf\RdfNamespace::set('skosext', 'http://purl.org/finnonto/schema/skosext#');
+EasyRdf\RdfNamespace::set('isothes', 'http://purl.org/iso25964/skos-thes#');
+EasyRdf\RdfNamespace::set('mads', 'http://www.loc.gov/mads/rdf/v1#');
+EasyRdf\RdfNamespace::set('wd', 'http://www.wikidata.org/entity/');
+EasyRdf\RdfNamespace::set('wdt', 'http://www.wikidata.org/prop/direct/');
 
-    public function __construct($config_name='/../config.inc')
+/**
+ * GlobalConfig provides access to the Skosmos configuration in config.ttl.
+ */
+class GlobalConfig extends BaseConfig {
+
+    /** Cache reference */
+    private $cache;
+    /** Location of the configuration file. Used for caching. */
+    private $filePath;
+    /** Namespaces from vocabularies configuration file. */
+    private $namespaces;
+    /** EasyRdf\Graph graph */
+    private $graph;
+
+    public function __construct($config_name='/../config.ttl')
     {
+        $this->cache = new Cache();
         try {
-            $file_path = dirname(__FILE__) . $config_name;
-            if (!file_exists($file_path)) {
-                throw new Exception('config.inc file is missing, please provide one.');
+            $this->filePath = realpath( dirname(__FILE__) . $config_name );
+            if (!file_exists($this->filePath)) {
+                throw new Exception('config.ttl file is missing, please provide one.');
             }
-            require_once($file_path);
-            if (isset($LANGUAGES)) {
-                $this->languages = $LANGUAGES;
-            }
+            $this->initializeConfig();
         } catch (Exception $e) {
             echo "Error: " . $e->getMessage();
             return;
         }
     }
 
-    private function getConstant($name, $default)
+    public function getCache()
     {
-        if (defined($name) && constant($name)) {
-            return constant($name);
+        return $this->cache;
+    }
+
+    /**
+     * Initialize configuration, reading the configuration file from the disk,
+     * and creating the graph and resources objects. Uses a cache if available,
+     * in order to avoid re-loading the complete configuration on each request.
+     */
+    private function initializeConfig()
+    {
+        try {
+            // use APC user cache to store parsed config.ttl configuration
+            if ($this->cache->isAvailable()) {
+                // @codeCoverageIgnoreStart
+                $key = realpath($this->filePath) . ", " . filemtime($this->filePath);
+                $nskey = "namespaces of " . $key;
+                $this->graph = $this->cache->fetch($key);
+                $this->namespaces = $this->cache->fetch($nskey);
+                if ($this->graph === false || $this->namespaces === false) { // was not found in cache
+                    $this->parseConfig($this->filePath);
+                    $this->cache->store($key, $this->graph);
+                    $this->cache->store($nskey, $this->namespaces);
+                }
+                // @codeCoverageIgnoreEnd
+            } else { // APC not available, parse on every request
+                $this->parseConfig($this->filePath);
+            }
+
+            $configResources = $this->graph->allOfType("skosmos:Configuration");
+            if (is_null($configResources) || !is_array($configResources) || count($configResources) !== 1) {
+                throw new Exception("config.ttl must have exactly one skosmos:Configuration");
+            }
+
+            $this->resource = $configResources[0];
+            $this->initializeNamespaces();
+        } catch (Exception $e) {
+            echo "Error: " . $e->getMessage();
+        }      
+    }
+
+    /**
+     * Parses configuration from the config.ttl file
+     * @param string $filename path to config.ttl file
+     * @throws \EasyRdf\Exception
+     */
+    private function parseConfig($filename)
+    {
+        $this->graph = new EasyRdf\Graph();
+        $parser = new SkosmosTurtleParser();
+        $parser->parse($this->graph, file_get_contents($filename), 'turtle', $filename);
+        $this->namespaces = $parser->getNamespaces();
+    }
+
+    /**
+     * Returns the graph created after parsing the configuration file.
+     * @return \EasyRdf\Graph
+     */
+    public function getGraph()
+    {
+        return $this->graph;
+    }
+
+    /**
+     * Registers RDF namespaces from the config.ttl file for use by EasyRdf (e.g. serializing)
+     */
+    private function initializeNamespaces() {
+        foreach ($this->namespaces as $prefix => $fullUri) {
+            if ($prefix != '' && EasyRdf\RdfNamespace::get($prefix) === null) // if not already defined
+            {
+                EasyRdf\RdfNamespace::set($prefix, $fullUri);
+            }
         }
-        return $default;
     }
 
     /**
@@ -38,20 +122,22 @@ class GlobalConfig {
      */
     public function getLanguages()
     {
-        if ($this->languages) {
-            return $this->languages;
+        $languageResources = $this->getResource()->getResource('skosmos:languages');
+        if (!is_null($languageResources) && !empty($languageResources)) {
+            $languages = array();
+            foreach ($languageResources as $languageResource) {
+                /** @var \EasyRdf\Literal $languageName */
+                $languageName = $languageResource->getLiteral('rdfs:label');
+                /** @var \EasyRdf\Literal $languageValue */
+                $languageValue = $languageResource->getLiteral('rdf:value');
+                if ($languageName && $languageValue) {
+                    $languages[$languageName->getValue()] = $languageValue->getValue();
+                }
+            }
+            return $languages;
+        } else {
+            return array('en' => 'en_GB.utf8');
         }
-        return array('en' => 'en_GB.utf8');
-    }
-
-    /**
-     * Returns the vocabulary configuration file specified the configuration
-     * or vocabularies.ttl if not found.
-     * @return string
-     */
-    public function getVocabularyConfigFile()
-    {
-        return $this->getConstant('VOCABULARIES_FILE', 'vocabularies.ttl');
     }
 
     /**
@@ -61,7 +147,7 @@ class GlobalConfig {
      */
     public function getHttpTimeout()
     {
-        return $this->getConstant('HTTP_TIMEOUT', 5);
+        return $this->getLiteral('skosmos:httpTimeout', 5);
     }
 
     /**
@@ -71,7 +157,7 @@ class GlobalConfig {
      */
     public function getSparqlTimeout()
     {
-        return $this->getConstant('SPARQL_TIMEOUT', 20);
+        return $this->getLiteral('skosmos:sparqlTimeout', 20);
     }
 
     /**
@@ -81,15 +167,12 @@ class GlobalConfig {
      */
     public function getDefaultEndpoint()
     {
-        return $this->getConstant('DEFAULT_ENDPOINT', 'http://localhost:3030/ds/sparql');
-    }
-
-    /**
-     * @return string
-     */
-    public function getSparqlGraphStore()
-    {
-        return $this->getConstant('SPARQL_GRAPH_STORE', null);
+        $endpoint = $this->resource->get('skosmos:sparqlEndpoint');
+        if ($endpoint) {
+            return $endpoint->getUri();
+        } else {
+            return 'http://localhost:3030/ds/sparql';
+        }
     }
 
     /**
@@ -99,7 +182,7 @@ class GlobalConfig {
      */
     public function getDefaultTransitiveLimit()
     {
-        return $this->getConstant('DEFAULT_TRANSITIVE_LIMIT', 1000);
+        return $this->getLiteral('skosmos:transitiveLimit', 1000);
     }
 
     /**
@@ -109,7 +192,7 @@ class GlobalConfig {
      */
     public function getSearchResultsSize()
     {
-        return $this->getConstant('SEARCH_RESULTS_SIZE', 20);
+        return $this->getLiteral('skosmos:searchResultsSize', 20);
     }
 
     /**
@@ -119,7 +202,7 @@ class GlobalConfig {
      */
     public function getTemplateCache()
     {
-        return $this->getConstant('TEMPLATE_CACHE', '/tmp/skosmos-template-cache');
+        return $this->getLiteral('skosmos:templateCache', '/tmp/skosmos-template-cache');
     }
 
     /**
@@ -129,7 +212,7 @@ class GlobalConfig {
      */
     public function getDefaultSparqlDialect()
     {
-        return $this->getConstant('DEFAULT_SPARQL_DIALECT', 'Generic');
+        return $this->getLiteral('skosmos:sparqlDialect', 'Generic');
     }
 
     /**
@@ -138,7 +221,25 @@ class GlobalConfig {
      */
     public function getFeedbackAddress()
     {
-        return $this->getConstant('FEEDBACK_ADDRESS', null);
+        return $this->getLiteral('skosmos:feedbackAddress', null);
+    }
+
+    /**
+     * Returns the feedback sender address defined in the configuration.
+     * @return string
+     */
+    public function getFeedbackSender()
+    {
+        return $this->getLiteral('skosmos:feedbackSender', null);
+    }
+
+    /**
+     * Returns the feedback envelope sender address defined in the configuration.
+     * @return string
+     */
+    public function getFeedbackEnvelopeSender()
+    {
+        return $this->getLiteral('skosmos:feedbackEnvelopeSender', null);
     }
 
     /**
@@ -147,7 +248,7 @@ class GlobalConfig {
      */
     public function getLogCaughtExceptions()
     {
-        return $this->getConstant('LOG_CAUGHT_EXCEPTIONS', FALSE);
+        return $this->getBoolean('skosmos:logCaughtExceptions', FALSE);
     }
 
     /**
@@ -156,7 +257,7 @@ class GlobalConfig {
      */
     public function getLoggingBrowserConsole()
     {
-        return $this->getConstant('LOG_BROWSER_CONSOLE', FALSE);
+        return $this->getBoolean('skosmos:logBrowserConsole', FALSE);
     }
 
     /**
@@ -165,7 +266,7 @@ class GlobalConfig {
      */
     public function getLoggingFilename()
     {
-        return $this->getConstant('LOG_FILE_NAME', null);
+        return $this->getLiteral('skosmos:logFileName', null);
     }
 
     /**
@@ -173,15 +274,7 @@ class GlobalConfig {
      */
     public function getServiceName()
     {
-        return $this->getConstant('SERVICE_NAME', 'Skosmos');
-    }
-
-    /**
-     * @return string
-     */
-    public function getServiceTagline()
-    {
-        return $this->getConstant('SERVICE_TAGLINE', null);
+        return $this->getLiteral('skosmos:serviceName', 'Skosmos');
     }
 
     /**
@@ -189,7 +282,7 @@ class GlobalConfig {
      */
     public function getCustomCss()
     {
-        return $this->getConstant('CUSTOM_CSS', null);
+        return $this->getLiteral('skosmos:customCss', null);
     }
 
     /**
@@ -197,7 +290,7 @@ class GlobalConfig {
      */
     public function getUiLanguageDropdown()
     {
-        return $this->getConstant('UI_LANGUAGE_DROPDOWN', FALSE);
+        return $this->getBoolean('skosmos:uiLanguageDropdown', FALSE);
     }
 
     /**
@@ -205,15 +298,22 @@ class GlobalConfig {
      */
     public function getBaseHref()
     {
-        return $this->getConstant('BASE_HREF', null);
+        return $this->getLiteral('skosmos:baseHref', null);
     }
 
     /**
-     * @return string
+     * @return array
      */
     public function getGlobalPlugins()
     {
-        return explode(' ', $this->getConstant('GLOBAL_PLUGINS', null));
+        $globalPlugins = array();
+        $globalPluginsResource =  $this->getResource()->getResource("skosmos:globalPlugins");
+        if ($globalPluginsResource) {
+            foreach ($globalPluginsResource as $resource) {
+                $globalPlugins[] = $resource->getValue();
+            }
+        }
+        return $globalPlugins;
     }
 
     /**
@@ -221,7 +321,7 @@ class GlobalConfig {
      */
     public function getHoneypotEnabled()
     {
-        return $this->getConstant('UI_HONEYPOT_ENABLED', TRUE);
+        return $this->getBoolean('skosmos:uiHoneypotEnabled', TRUE);
     }
 
     /**
@@ -229,7 +329,7 @@ class GlobalConfig {
      */
     public function getHoneypotTime()
     {
-        return $this->getConstant('UI_HONEYPOT_TIME', 5);
+        return $this->getLiteral('skosmos:uiHoneypotTime', 5);
     }
 
     /**
@@ -237,6 +337,6 @@ class GlobalConfig {
      */
     public function getCollationEnabled()
     {
-        return $this->getConstant('SPARQL_COLLATION_ENABLED', FALSE);
+        return $this->getBoolean('skosmos:sparqlCollationEnabled', FALSE);
     }
 }

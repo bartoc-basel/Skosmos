@@ -6,13 +6,14 @@ class RequestTest extends PHPUnit\Framework\TestCase
   private $request;
 
   protected function setUp() {
+    putenv("LANGUAGE=en_GB.utf8");
     putenv("LC_ALL=en_GB.utf8");
     setlocale(LC_ALL, 'en_GB.utf8');
     bindtextdomain('skosmos', 'resource/translations');
     bind_textdomain_codeset('skosmos', 'UTF-8');
     textdomain('skosmos');
 
-    $config = new GlobalConfig('/../tests/testconfig.inc');
+    $config = new GlobalConfig('/../tests/testconfig.ttl');
     $this->model = new Model($config);
     $this->request = new Request($this->model);
   }
@@ -134,7 +135,7 @@ class RequestTest extends PHPUnit\Framework\TestCase
    */
   public function testGetLetterWhenNotSet() {
     $this->request->setVocab('test');
-    $this->assertEquals('A', $this->request->getLetter());
+    $this->assertEquals('', $this->request->getLetter());
   }
 
   /**

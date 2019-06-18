@@ -29,7 +29,7 @@ class WebController extends Controller
         // initialize Twig templates
         $tmpDir = $model->getConfig()->getTemplateCache();
 
-        // check if the cache pointed by config.inc exists, if not we create it.
+        // check if the cache pointed by config.ttl exists, if not we create it.
         if (!file_exists($tmpDir)) {
             mkdir($tmpDir);
         }
@@ -41,10 +41,10 @@ class WebController extends Controller
         $this->twig->addExtension(new Twig_Extensions_Extension_I18n());
         // used for setting the base href for the relative urls
         $this->twig->addGlobal("BaseHref", $this->getBaseHref());
-        // setting the service name string from the config.inc
+        // setting the service name string from the config.ttl
         $this->twig->addGlobal("ServiceName", $this->model->getConfig()->getServiceName());
 
-        // setting the service custom css file from the config.inc
+        // setting the service custom css file from the config.ttl
         if ($this->model->getConfig()->getCustomCss() !== null) {
             $this->twig->addGlobal("ServiceCustomCss", $this->model->getConfig()->getCustomCss());
         }
@@ -254,7 +254,9 @@ class WebController extends Controller
         $feedbackName = $request->getQueryParamPOST('name');
         $feedbackEmail = $request->getQueryParamPOST('email');
         $feedbackVocab = $request->getQueryParamPOST('vocab');
-        $feedbackVocabEmail = ($vocab !== null) ? $vocab->getConfig()->getFeedbackRecipient() : null;
+
+        $feedbackVocabEmail = ($feedbackVocab !== null && $feedbackVocab !== '') ?
+            $this->model->getVocabulary($feedbackVocab)->getConfig()->getFeedbackRecipient() : null;
 
         // if the hidden field has been set a value we have found a spam bot
         // and we do not actually send the message.
@@ -273,15 +275,19 @@ class WebController extends Controller
             ));
     }
 
-    private function createFeedbackHeaders($fromName, $fromEmail, $toMail)
+    private function createFeedbackHeaders($fromName, $fromEmail, $toMail, $sender)
     {
         $headers = "MIME-Version: 1.0″ . '\r\n";
         $headers .= "Content-type: text/html; charset=UTF-8" . "\r\n";
-        if ($toMail) {
+        if (!empty($toMail)) {
             $headers .= "Cc: " . $this->model->getConfig()->getFeedbackAddress() . "\r\n";
         }
+        if (!empty($fromEmail)) {
+            $headers .= "Reply-To: $fromName <$fromEmail>\r\n";
+        }
 
-        $headers .= "From: $fromName <$fromEmail>" . "\r\n" . 'X-Mailer: PHP/' . phpversion();
+        $service = $this->model->getConfig()->getServiceName();
+        $headers .= "From: $fromName via $service <$sender>";
         return $headers;
     }
 
@@ -299,16 +305,23 @@ class WebController extends Controller
             $message = 'Feedback from vocab: ' . strtoupper($fromVocab) . "<br />" . $message;
         }
 
-        $subject = SERVICE_NAME . " feedback";
-        $headers = $this->createFeedbackHeaders($fromName, $fromEmail, $toMail);
-        $envelopeSender = FEEDBACK_ENVELOPE_SENDER;
+        $envelopeSender = $this->model->getConfig()->getFeedbackEnvelopeSender();
+        $subject = $this->model->getConfig()->getServiceName() . " feedback";
+        // determine the sender address of the message
+        $sender = $this->model->getConfig()->getFeedbackSender();
+        if (empty($sender)) $sender = $envelopeSender;
+        if (empty($sender)) $sender = $this->model->getConfig()->getFeedbackAddress();
+
+        // determine sender name - default to "anonymous user" if not given by user
+        if (empty($fromName)) $fromName = "anonymous user";
+
+        $headers = $this->createFeedbackHeaders($fromName, $fromEmail, $toMail, $sender);
         $params = empty($envelopeSender) ? '' : "-f $envelopeSender";
 
         // adding some information about the user for debugging purposes.
         $message = $message . "<br /><br /> Debugging information:"
             . "<br />Timestamp: " . date(DATE_RFC2822)
             . "<br />User agent: " . $request->getServerConstant('HTTP_USER_AGENT')
-            . "<br />IP address: " . $request->getServerConstant('REMOTE_ADDR')
             . "<br />Referer: " . $request->getServerConstant('HTTP_REFERER');
 
         try {
@@ -393,7 +406,7 @@ class WebController extends Controller
                 'search_results' => $searchResults,
                 'rest' => $parameters->getOffset()>0,
                 'global_search' => true,
-                'term' => $request->getQueryParam('q'),
+                'term' => $request->getQueryParamRaw('q'),
                 'lang_list' => $langList,
                 'vocabs' => str_replace(' ', '+', $vocabs),
                 'vocab_list' => $vocabList,
@@ -461,7 +474,7 @@ class WebController extends Controller
                 'limit_scheme' =>  $request->getQueryParam('scheme') ? explode('+', $request->getQueryParam('scheme')) : null,
                 'group_index' => $vocab->listConceptGroups($request->getContentLang()),
                 'parameters' => $parameters,
-                'term' => $request->getQueryParam('q'),
+                'term' => $request->getQueryParamRaw('q'),
                 'types' => $vocabTypes,
                 'explicit_langcodes' => $langcodes,
                 'request' => $request,
@@ -489,11 +502,15 @@ class WebController extends Controller
 
         $allAtOnce = $vocab->getConfig()->getAlphabeticalFull();
         if (!$allAtOnce) {
-            $searchResults = $vocab->searchConceptsAlphabetical($request->getLetter(), $count, $offset, $contentLang);
             $letters = $vocab->getAlphabet($contentLang);
+            $letter = $request->getLetter();
+            if ($letter === '') {
+                $letter = $letters[0];
+            }
+            $searchResults = $vocab->searchConceptsAlphabetical($letter, $count, $offset, $contentLang);
         } else {
-            $searchResults = $vocab->searchConceptsAlphabetical('*', null, null, $contentLang);
             $letters = null;
+            $searchResults = $vocab->searchConceptsAlphabetical('*', null, null, $contentLang);
         }
 
         $request->setContentLang($contentLang);
