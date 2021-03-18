@@ -2,8 +2,12 @@ sudo: required
 dist: trusty
 language: php
 php:
-  - "7.0"
+  - 7.1
+  - 7.2
+  - 7.3
+  - 7.4
 install:
+  - phpenv config-rm xdebug.ini
   - composer install
 cache:
   directories:
@@ -14,20 +18,23 @@ before_script:
   - chmod +x ./cc-test-reporter
   - ./cc-test-reporter before-build
   - cd tests
+  - export LANGUAGE=fr
   - sh ./init_fuseki.sh
   - cd ..
+script:
+  - phpdbg -qrr vendor/bin/phpunit
 after_script:
   - ./cc-test-reporter after-build --exit-code $TRAVIS_TEST_RESULT
+  - bash <(curl -s https://codecov.io/bash)
   - pkill -f 'java -Xmx1200M -jar'
-addons:
-  code_climate:
-    repo_token: fb98170a5c7ea9cc2bbab19ff26268335e6a11a4f8267ca935e5e8ff4624886c
 env:
-  - FUSEKI_VERSION=3.4.0
-  - FUSEKI_VERSION=SNAPSHOT
-  - CC_TEST_REPORTER_ID=fb98170a5c7ea9cc2bbab19ff26268335e6a11a4f8267ca935e5e8ff4624886c
+  global:
+    - CC_TEST_REPORTER_ID=fb98170a5c7ea9cc2bbab19ff26268335e6a11a4f8267ca935e5e8ff4624886c
+  matrix:
+    - FUSEKI_VERSION=3.14.0
 matrix:
+  exclude:
   allow_failures:
-  - env: FUSEKI_VERSION=SNAPSHOT
+  - php: 7.4
 notifications:
-    slack: finto:5rO9Lp4Tstn6y34grtFBpjJ0
+    slack: kansalliskirjasto:9mOKu3Vws1CIddF5jqWgXbli

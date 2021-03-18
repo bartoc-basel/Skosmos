@@ -6,9 +6,10 @@ class ModelTest extends PHPUnit\Framework\TestCase
   private $model;
 
   protected function setUp() {
+    putenv("LANGUAGE=en_GB.utf8");
     putenv("LC_ALL=en_GB.utf8");
     setlocale(LC_ALL, 'en_GB.utf8');
-    $this->model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $this->model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $this->params = $this->getMockBuilder('ConceptSearchParameters')->disableOriginalConstructor()->getMock();
     $this->params->method('getVocabIds')->will($this->returnValue(array('test')));
     $this->params->method('getVocabs')->will($this->returnValue(array($this->model->getVocabulary('test'))));
@@ -23,7 +24,8 @@ class ModelTest extends PHPUnit\Framework\TestCase
    */
   public function testConstructorWithConfig()
   {
-    new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
+    $this->assertNotNull($model);
   }
 
   /**
@@ -57,7 +59,7 @@ class ModelTest extends PHPUnit\Framework\TestCase
    * @covers Model::getVocabulariesInCategory
    */
   public function testGetVocabulariesInCategory() {
-    $category = $this->model->getVocabulariesInCategory('cat_science');
+    $category = $this->model->getVocabulariesInCategory(new EasyRdf\Resource('http://base/#cat_science'));
     foreach($category as $vocab)
       $this->assertInstanceOf('Vocabulary', $vocab);
   }
@@ -91,7 +93,7 @@ class ModelTest extends PHPUnit\Framework\TestCase
   /**
    * @covers Model::getVocabularyByGraph
    * @expectedException \Exception
-   * @expectedExceptionMessage no vocabulary found for graph http://no/address and endpoint http://localhost:3030/ds/sparql
+   * @expectedExceptionMessage no vocabulary found for graph http://no/address and endpoint http://localhost:13030/skosmos-test/sparql
    */
   public function testGetVocabularyByInvalidGraphUri() {
     $vocab = $this->model->getVocabularyByGraph('http://no/address');
@@ -161,9 +163,13 @@ class ModelTest extends PHPUnit\Framework\TestCase
 
   /**
    * @covers Model::searchConcepts
-   * @expectedException PHPUnit\Framework\Error\Error
    */
   public function testSearchWithNoParams() {
+    if (PHP_VERSION_ID >= 70100) {
+      $this->expectException(ArgumentCountError::class);
+    } else {
+      $this->expectException(PHPUnit\Framework\Error\Error::class);
+    }
     $result = $this->model->searchConcepts();
   }
 
@@ -231,6 +237,12 @@ class ModelTest extends PHPUnit\Framework\TestCase
     $result = $this->model->searchConcepts($this->params);
     $this->assertEquals('http://www.skosmos.skos/test/ta123', $result[0]['uri']);
     $this->assertEquals('multiple broaders', $result[0]['prefLabel']);
+
+    // sort by URI to ensure their relative order
+    usort($result[0]['skos:broader'], function($a, $b) {
+        return strnatcasecmp($a['uri'], $b['uri']);
+    });
+
     $this->assertCount(2, $result[0]['skos:broader']); // two broader concepts
     $this->assertEquals('http://www.skosmos.skos/test/ta118', $result[0]['skos:broader'][0]['uri']);
     $this->assertEquals('-"special" character \\example\\', $result[0]['skos:broader'][0]['prefLabel']);
@@ -247,10 +259,10 @@ class ModelTest extends PHPUnit\Framework\TestCase
     $params->method('getVocabIds')->will($this->returnValue('duplicates'));
     $params->method('getVocabs')->will($this->returnValue(array($this->model->getVocabulary('duplicates'))));
     $result = $this->model->searchConcepts($params);
-    $this->assertCount(3, $result);
+    $this->assertCount(4, $result);
     $params->method('getUnique')->will($this->returnValue(true));
     $result = $this->model->searchConcepts($params);
-    $this->assertCount(2, $result);
+    $this->assertCount(3, $result);
   }
 
   /**
@@ -292,7 +304,7 @@ class ModelTest extends PHPUnit\Framework\TestCase
   }
 
   /**
-   * Test for issue #387: make sure namespaces defined in vocabularies.ttl are used for RDF export
+   * Test for issue #387: make sure namespaces defined in config.ttl are used for RDF export
    * @covers Model::getRDF
    */
 
@@ -493,7 +505,7 @@ test:ta126
    * Issue: https://github.com/NatLibFi/Skosmos/pull/419
    */
   public function testGetRDFShouldNotIncludeExtraBlankNodesFromLists() {
-    $model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $result = $model->getRDF('test', 'http://www.skosmos.skos/test/ta125', 'text/turtle');
     $resultGraph = new EasyRdf\Graph();
     $resultGraph->parse($result, "turtle");
@@ -526,8 +538,6 @@ test:ta125
 
   /**
    * @covers Model::getResourceFromUri
-   * @covers Model::getResourceLabel
-   * @covers Model::fetchResourceFromUri
    */
   public function testGetResourceFromUri() {
     $resource = $this->model->getResourceFromUri('http://www.yso.fi/onto/yso/p19378');

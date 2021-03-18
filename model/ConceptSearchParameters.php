@@ -48,8 +48,7 @@ class ConceptSearchParameters
             return ($vocabs !== null && $vocabs !== '') ? explode(' ', $vocabs) : null;
         }
         $vocabs = $this->getVocabs();
-        $ret = isset($vocabs[0]) ? array($vocabs[0]->getId()) : null;
-        return $ret;
+        return isset($vocabs[0]) ? array($vocabs[0]->getId()) : null;
     }
 
     public function setVocabularies($vocabs)
@@ -124,7 +123,7 @@ class ConceptSearchParameters
     }
 
     private function getQueryParamArray($name) {
-        return $this->request->getQueryParam($name) ? explode(' ', urldecode($this->request->getQueryParam($name))) : null;
+        return $this->request->getQueryParam($name) ? explode(' ', urldecode($this->request->getQueryParam($name))) : [];
     }
 
     public function getGroupLimit()

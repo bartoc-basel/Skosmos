@@ -1,26 +1,12 @@
 <?php
 
 /**
- * Setting some often needed namespace prefixes
- */
-EasyRdf\RdfNamespace::set('skosmos', 'http://purl.org/net/skosmos#');
-EasyRdf\RdfNamespace::set('skosext', 'http://purl.org/finnonto/schema/skosext#');
-EasyRdf\RdfNamespace::set('isothes', 'http://purl.org/iso25964/skos-thes#');
-EasyRdf\RdfNamespace::set('mads', 'http://www.loc.gov/mads/rdf/v1#');
-EasyRdf\RdfNamespace::set('wd', 'http://www.wikidata.org/entity/');
-EasyRdf\RdfNamespace::set('wdt', 'http://www.wikidata.org/prop/direct/');
-
-/**
  * Model provides access to the data.
  * @property EasyRdf\Graph $graph
  * @property GlobalConfig $globalConfig
  */
 class Model
 {
-    /** EasyRdf\Graph graph instance */
-    private $graph;
-    /** Namespaces from vocabularies configuration file */
-    private $namespaces;
     /** cache for Vocabulary objects */
     private $allVocabularies = null;
     /** cache for Vocabulary objects */
@@ -30,8 +16,8 @@ class Model
     /** how long to store retrieved URI information in APC cache */
     const URI_FETCH_TTL = 86400; // 1 day
     private $globalConfig;
-    private $cache;
     private $logger;
+    private $resolver;
 
     /**
      * Initializes the Model object
@@ -39,16 +25,8 @@ class Model
     public function __construct($config)
     {
         $this->globalConfig = $config;
-        try {
-          $this->cache = new Cache();
-          $this->initializeVocabularies();
-          $this->initializeNamespaces();
-          $this->initializeLogging();
-        } catch (Exception $e) {
-            header("HTTP/1.0 404 Not Found");
-            echo("Error: Vocabularies configuration file 'vocabularies.ttl' not found.");
-            return;
-        }
+        $this->initializeLogging();
+        $this->resolver = new Resolver($this);
     }
 
     /**
@@ -57,63 +35,6 @@ class Model
      */
     public function getConfig() {
       return $this->globalConfig;
-    }
-
-    /**
-     * Initializes the configuration from the vocabularies.ttl file
-     */
-    private function initializeVocabularies()
-    {
-        if (!file_exists($this->getConfig()->getVocabularyConfigFile())) {
-            throw new Exception($this->getConfig()->getVocabularyConfigFile() . ' is missing, please provide one.');
-        }
-
-        try {
-            // use APC user cache to store parsed vocabularies.ttl configuration
-            if ($this->cache->isAvailable()) {
-                // @codeCoverageIgnoreStart
-                $key = realpath($this->getConfig()->getVocabularyConfigFile()) . ", " . filemtime($this->getConfig()->getVocabularyConfigFile());
-                $nskey = "namespaces of " . $key;
-                $this->graph = $this->cache->fetch($key);
-                $this->namespaces = $this->cache->fetch($nskey);
-                if ($this->graph === false || $this->namespaces === false) { // was not found in cache
-                    $this->parseVocabularies($this->getConfig()->getVocabularyConfigFile());
-                    $this->cache->store($key, $this->graph);
-                    $this->cache->store($nskey, $this->namespaces);
-                }
-                // @codeCoverageIgnoreEnd
-            } else { // APC not available, parse on every request
-                $this->parseVocabularies($this->getConfig()->getVocabularyConfigFile());
-            }
-        } catch (Exception $e) {
-            echo "Error: " . $e->getMessage();
-        }
-    }
-
-    /**
-     * Parses vocabulary configuration and RDF namespaces from the vocabularies.ttl file
-     * @param string $filename path to vocabularies.ttl file
-     */
-
-    private function parseVocabularies($filename)
-    {
-        $this->graph = new EasyRdf\Graph();
-        $parser = new SkosmosTurtleParser();
-        $parser->parse($this->graph, file_get_contents($filename), 'turtle', $filename);
-        $this->namespaces = $parser->getNamespaces();
-    }
-
-    /**
-     * Registers RDF namespaces from the vocabularies.ttl file for use by EasyRdf (e.g. serializing)
-     */
-
-    private function initializeNamespaces() {
-        foreach ($this->namespaces as $prefix => $fullUri) {
-            if ($prefix != '' && EasyRdf\RdfNamespace::get($prefix) === null) // if not already defined
-            {
-                EasyRdf\RdfNamespace::set($prefix, $fullUri);
-            }
-        }
     }
 
     /**
@@ -157,7 +78,7 @@ class Model
     {
         $ver = null;
         if (file_exists('.git')) {
-            $ver = shell_exec('git describe --tags');
+            $ver = shell_exec('git describe --tags --always');
         }
 
         if ($ver === null) {
@@ -172,7 +93,7 @@ class Model
      * @param boolean $categories whether you want everything included in a subarray of
      * a category.
      * @param boolean $shortname set to true if you want the vocabularies sorted by
-     * their shortnames instead of ther titles.
+     * their shortnames instead of their titles.
      */
     public function getVocabularyList($categories = true, $shortname = false)
     {
@@ -282,6 +203,7 @@ class Model
         if (!$result->isEmpty()) {
             return $serialiser->serialise($result, $retform);
         }
+        return "";
     }
 
     /**
@@ -317,26 +239,29 @@ class Model
 
         foreach ($results as $hit) {
             if (sizeof($vocabs) == 1) {
+                $hitvoc = $voc;
                 $hit['vocab'] = $vocabs[0]->getId();
             } else {
                 try {
-                    $voc = $this->getVocabularyByGraph($hit['graph']);
-                    $hit['vocab'] = $voc->getId();
+                    $hitvoc = $this->getVocabularyByGraph($hit['graph']);
+                    $hit['vocab'] = $hitvoc->getId();
                 } catch (Exception $e) {
                     trigger_error($e->getMessage(), E_USER_WARNING);
-                    $voc = null;
+                    $hitvoc = null;
                     $hit['vocab'] = "???";
                 }
             }
             unset($hit['graph']);
 
-            $hit['voc'] = $voc;
+            $hit['voc'] = $hitvoc;
 
-            // if uri is a external vocab uri that is included in the current vocab
-            $realvoc = $this->guessVocabularyFromURI($hit['uri']);
-            if ($realvoc != $voc) {
-                unset($hit['localname']);
-                $hit['exvocab'] = ($realvoc !== null) ? $realvoc->getId() : "???";
+            if (!$hitvoc->containsURI($hit['uri'])) {
+                // if uri is a external vocab uri that is included in the current vocab
+                $realvoc = $this->guessVocabularyFromURI($hit['uri'], $voc !== null ? $voc->getId() : null);
+                if ($realvoc !== $hitvoc) {
+                    unset($hit['localname']);
+                    $hit['exvocab'] = ($realvoc !== null) ? $realvoc->getId() : "???";
+                }
             }
 
             $ret[] = $hit;
@@ -423,7 +348,7 @@ class Model
     public function getVocabularies()
     {
         if ($this->allVocabularies === null) { // initialize cache
-            $vocs = $this->graph->allOfType('skosmos:Vocabulary');
+            $vocs = $this->globalConfig->getGraph()->allOfType('skosmos:Vocabulary');
             $this->allVocabularies = $this->createDataObjects("Vocabulary", $vocs);
             foreach ($this->allVocabularies as $voc) {
                 // register vocabulary ids as RDF namespace prefixes
@@ -450,8 +375,7 @@ class Model
      */
     public function getVocabulariesInCategory($cat)
     {
-        $vocs = $this->graph->resourcesMatching('dc:subject', $cat);
-
+        $vocs = $this->globalConfig->getGraph()->resourcesMatching('dc:subject', $cat);
         return $this->createDataObjects("Vocabulary", $vocs);
     }
 
@@ -461,7 +385,7 @@ class Model
      */
     public function getVocabularyCategories()
     {
-        $cats = $this->graph->allOfType('skos:Concept');
+        $cats = $this->globalConfig->getGraph()->allOfType('skos:Concept');
         if(empty($cats)) {
             return array(new VocabularyCategory($this, null));
         }
@@ -470,24 +394,22 @@ class Model
     }
 
     /**
-     * Returns the label defined in vocabularies.ttl with the appropriate language.
+     * Returns the label defined in config.ttl with the appropriate language.
      * @param string $lang language code of returned labels, eg. 'fi'
      * @return string the label for vocabulary categories.
      */
     public function getClassificationLabel($lang)
     {
-        $cats = $this->graph->allOfType('skos:ConceptScheme');
-        $label = $cats ? $cats[0]->label($lang) : null;
-
-        return $label;
+        $cats = $this->globalConfig->getGraph()->allOfType('skos:ConceptScheme');
+        return $cats ? $cats[0]->label($lang) : null;
     }
 
     /**
      * Returns a single cached vocabulary.
      * @param string $vocid the vocabulary id eg. 'mesh'.
-     * @return vocabulary dataobject
+     * @return Vocabulary dataobject
      */
-    public function getVocabulary($vocid)
+    public function getVocabulary($vocid): Vocabulary
     {
         $vocs = $this->getVocabularies();
         foreach ($vocs as $voc) {
@@ -548,7 +470,13 @@ class Model
         if($preferredVocabId != null) {
             foreach ($vocabs as $vocab) {
                 if($vocab->getId() == $preferredVocabId) {
-                    return $vocab;
+                    // double check that a label exists in the preferred vocabulary
+                    if ($vocab->getConceptLabel($uri, null) !== null) {
+                        return $vocab;
+                    } else {
+                        // not found in preferred vocabulary, fall back to next method
+                        break;
+                    }
                 }
             }
         }
@@ -618,44 +546,20 @@ class Model
         return $res->label(); // desperate check for label in any language; will return null if even this fails
     }
 
-    private function fetchResourceFromUri($uri)
-    {
-        try {
-            // change the timeout setting for external requests
-            $httpclient = EasyRdf\Http::getDefaultHttpClient();
-            $httpclient->setConfig(array('timeout' => $this->getConfig()->getHttpTimeout()));
-            EasyRdf\Http::setDefaultHttpClient($httpclient);
-
-            $client = EasyRdf\Graph::newAndLoad(EasyRdf\Utils::removeFragmentFromUri($uri));
-            return $client->resource($uri);
-        } catch (Exception $e) {
-            return null;
-        }
-    }
-
     public function getResourceFromUri($uri)
     {
-        // prevent parsing errors for sources which return invalid JSON (see #447)
-        // 1. Unregister the legacy RDF/JSON parser, we don't want to use it
-        EasyRdf\Format::unregister('json');
-        // 2. Add "application/json" as a possible MIME type for the JSON-LD format
-        $jsonld = EasyRdf\Format::getFormat('jsonld');
-        $mimetypes = $jsonld->getMimeTypes();
-        $mimetypes['application/json'] = 0.5;
-        $jsonld->setMimeTypes($mimetypes);
-
         // using apc cache for the resource if available
-        if ($this->cache->isAvailable()) {
+        if ($this->globalConfig->getCache()->isAvailable()) {
             // @codeCoverageIgnoreStart
             $key = 'fetch: ' . $uri;
-            $resource = $this->cache->fetch($key);
+            $resource = $this->globalConfig->getCache()->fetch($key);
             if ($resource === null || $resource === false) { // was not found in cache, or previous request failed
-                $resource = $this->fetchResourceFromUri($uri);
-                $this->cache->store($key, $resource, self::URI_FETCH_TTL);
+                $resource = $this->resolver->resolve($uri, $this->getConfig()->getHttpTimeout());
+                $this->globalConfig->getCache()->store($key, $resource, self::URI_FETCH_TTL);
             }
             // @codeCoverageIgnoreEnd
         } else { // APC not available, parse on every request
-            $resource = $this->fetchResourceFromUri($uri);
+            $resource = $this->resolver->resolve($uri, $this->getConfig()->getHttpTimeout());
         }
         return $resource;
     }
@@ -664,7 +568,7 @@ class Model
      * Returns a SPARQL endpoint object.
      * @param string $dialect eg. 'JenaText'.
      * @param string $endpoint url address of endpoint
-     * @param string $graph uri for the target graph.
+     * @param string|null $graph uri for the target graph.
      */
     public function getSparqlImplementation($dialect, $endpoint, $graph)
     {
@@ -674,7 +578,7 @@ class Model
     }
 
     /**
-     * Returns a SPARQL endpoint object using the default implementation set in the config.inc.
+     * Returns a SPARQL endpoint object using the default implementation set in the config.ttl.
      */
     public function getDefaultSparql()
     {

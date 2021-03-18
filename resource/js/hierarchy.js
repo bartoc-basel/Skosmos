@@ -39,12 +39,14 @@ function invokeParentTree(tree) {
   });
 
   $treeObject.on('loaded.jstree', function() {
+    var $sidebarGrey = $(".sidebar-grey");
     if ($('#sidebar .mCustomScrollbar').length === 0) {
-      $(".sidebar-grey").mCustomScrollbar(hierTreeConf);
+      $sidebarGrey.mCustomScrollbar(hierTreeConf);
     }
-    if ($('.jstree-leaf-proper').length > 0) {
-      $('.sidebar-grey').jstree('select_node', $('.jstree-leaf-proper').toArray());
-      $('.sidebar-grey').mCustomScrollbar('scrollTo', getLeafOffset());
+    var $leafProper = $('.jstree-leaf-proper');
+    if ($leafProper.length > 0) {
+      $sidebarGrey.jstree('select_node', $leafProper.toArray());
+      $sidebarGrey.mCustomScrollbar('scrollTo', getLeafOffset());
     }
   });
 }
@@ -53,8 +55,9 @@ function getLeafOffset() {
   var containerHeight = $('.sidebar-grey').height();
   var conceptCount = Math.floor((containerHeight * 0.66) / 18);
   var scrollAmount = 18 * conceptCount;
-  if ($('.jstree-leaf-proper').length) {
-    var newOffset = $('.jstree-leaf-proper')[0].offsetTop-scrollAmount;
+  var $leafProper = $('.jstree-leaf-proper');
+  if ($leafProper.length) {
+    var newOffset = $leafProper[0].offsetTop-scrollAmount;
     if (newOffset > 0) // only scrolls the view if the concept isn't already at the top.
       return newOffset;
   }
@@ -76,8 +79,9 @@ function createObjectsFromChildren(conceptData, conceptUri) {
   for (var i = 0; i < conceptData.narrower.length; i++) {
     var childObject = {
       text: getLabel(conceptData.narrower[i]), 
-      a_attr: getConceptHref(conceptData.narrower[i]),
+      a_attr: getHrefForUri(conceptData.narrower[i].uri),
       uri: conceptData.narrower[i].uri,
+      notation: conceptData.narrower[i].notation,
       parents: conceptUri,
       state: { opened: true }
     };
@@ -101,8 +105,9 @@ function createObjectsFromChildren(conceptData, conceptUri) {
 function createConceptObject(conceptUri, conceptData) {
   var newNode = { 
     text: getLabel(conceptData), 
-    a_attr: getConceptHref(conceptData),
+    a_attr: getHrefForUri(conceptData.uri),
     uri: conceptUri,
+    notation: conceptData.notation,
     parents: conceptData.broader,
     state: { opened: true },
     children: []
@@ -129,7 +134,7 @@ function createConceptObject(conceptUri, conceptData) {
  */
 function attachTopConceptsToSchemes(schemes, currentNode, parentData) {
   for (var i = 0; i < schemes.length; i++) {
-    if (schemes[i].uri === parentData[currentNode.uri].top) {
+    if (parentData[currentNode.uri].tops.indexOf(schemes[i].uri) !== -1) {
       if(Object.prototype.toString.call(schemes[i].children) !== '[object Array]' ) {
         schemes[i].children = [];
       }
@@ -137,7 +142,6 @@ function attachTopConceptsToSchemes(schemes, currentNode, parentData) {
       // the hierarchy response contains the parent info before the topConcepts so it's a safe to open the first one without broaders 
       if (!schemes.opened && !currentNode.broader) {
         schemes[i].state = currentNode.state;
-        schemes.opened = true;
       }
     }
   }
@@ -197,28 +201,15 @@ function buildParentTree(uri, parentData, schemes) {
   return JSON.parse(JSON.stringify(rootArray));
 }
 
-function getConceptHref(conceptData) {
-  if (conceptData.uri.indexOf(window.uriSpace) !== -1) {
-    var page = conceptData.uri.substr(window.uriSpace.length);
-    if (/[^a-zA-Z0-9\.]/.test(page) || page.indexOf("/") > -1 ) {
-      // contains special characters or contains an additionnal '/' - fall back to full URI
-      page = '?uri=' + encodeURIComponent(conceptData.uri);
-    }
-  } else {
-    // not within URI space - fall back to full URI
-    page = '?uri=' + encodeURIComponent(conceptData.uri);
-  }
-  return { "href" : vocab + '/' + lang + '/page/' + page };
-}
-
 function vocabRoot(topConcepts) {
   var topArray = [];
   for (var i = 0; i < topConcepts.length; i++) {
     var conceptData = topConcepts[i];
     var childObject = {
       text: conceptData.label, 
-      a_attr : getConceptHref(conceptData),
+      a_attr : getHrefForUri(conceptData.uri),
       uri: conceptData.uri,
+      notation: conceptData.notation,
       state: { opened: false } 
     };
     if (conceptData.hasChildren)
@@ -258,17 +249,19 @@ function appendChildrenToParents() {
 }
 
 function createObjectsFromNarrowers(narrowerResponse) {
+
   var childArray = [];
   for (var i = 0; i < narrowerResponse.narrower.length; i++) {
     var conceptObject = narrowerResponse.narrower[i];
     var childObject = {
       text : getLabel(conceptObject), 
-      a_attr : getConceptHref(conceptObject),
+      a_attr : getHrefForUri(conceptObject.uri),
       uri: conceptObject.uri,
+      notation: conceptObject.notation,
       parents: narrowerResponse.uri,
       state: { opened: false, disabled: false, selected: false }
     };
-    childObject.children = conceptObject.hasChildren ? true : false;
+    childObject.children = !!conceptObject.hasChildren;
     setNode(childObject);
     childArray.push(childObject);
   }
@@ -302,6 +295,7 @@ function schemeRoot(schemes) {
         text: label, 
         a_attr : { "href" : vocab + '/' + lang + '/page/?uri=' + scheme.uri, 'class': 'scheme'},
         uri: scheme.uri,
+        notation: scheme.notation,
         children: true,
         state: { opened: false } 
       };
@@ -332,8 +326,9 @@ function topConceptsToSchemes(topConcepts, schemes) {
     var hasChildren = topConcept.hasChildren; 
     var childObject = {
       text : getLabel(topConcept), 
-      a_attr : { "href" : vocab + '/' + lang + '/page/?uri=' + encodeURIComponent(topConcept.uri) },
+      a_attr: getHrefForUri(topConcept.uri),
       uri: topConcept.uri,
+      notation: topConcept.notation,
       state: { opened: false, disabled: false, selected: false }
     };
     if (hasChildren) {
@@ -427,7 +422,29 @@ function getTreeConfiguration() {
         }
     },
     'plugins' : ['sort'],
-    'sort' : function (a,b) { return naturalCompare(this.get_text(a).toLowerCase(), this.get_text(b).toLowerCase()); }
+    'sort' : function (a,b) {
+        var aNode = this.get_node(a);
+        var bNode = this.get_node(b);
+
+        if (window.showNotation) {
+            var aNotation = aNode.original.notation;
+            var bNotation = bNode.original.notation;
+
+            if (aNotation) {
+                if (bNotation) {
+                    if (aNotation < bNotation) {
+                        return -1;
+                    }
+                    else if (aNotation > bNotation) {
+                        return 1;
+                    }
+                }
+                else return -1;
+            }
+            else if (bNotation) return 1;
+        }
+        return naturalCompare(aNode.text.toLowerCase(), bNode.text.toLowerCase());
+    }
   });
 }
 

@@ -4,7 +4,7 @@
  * Dataobject for a single concept.
  */
 
-class Concept extends VocabularyDataObject
+class Concept extends VocabularyDataObject implements Modifiable
 {
     /**
      * Stores a label string if the concept has been found through
@@ -78,14 +78,13 @@ class Concept extends VocabularyDataObject
     public function __construct($model, $vocab, $resource, $graph, $clang)
     {
         parent::__construct($model, $vocab, $resource);
-        $this->order = array("rdf:type", "dc:isReplacedBy", "skos:definition", "skos:broader", "skos:narrower", "skos:related", "skos:altLabel", "skosmos:memberOf", "skos:note", "skos:scopeNote", "skos:historyNote", "rdfs:comment", "dc11:source", "dc:source", "skos:prefLabel");
+        if ($vocab !== null) {
+            $this->order = $vocab->getConfig()->getPropertyOrder();
+        } else {
+            $this->order = VocabularyConfig::DEFAULT_PROPERTY_ORDER;
+        }
         $this->graph = $graph;
         $this->clang = $clang;
-        // setting the Punic plugins locale for localized datetime conversions
-        if ($this->clang && $this->clang !== '') {
-            Punic\Data::setDefaultLocale($clang);
-        }
-
     }
 
     /**
@@ -391,7 +390,10 @@ class Concept extends VocabularyDataObject
         }
     }
 
-    public function getMappingProperties()
+    /**
+     * @return ConceptProperty[]
+     */
+    public function getMappingProperties(array $whitelist = null)
     {
         $ret = array();
 
@@ -401,9 +403,13 @@ class Concept extends VocabularyDataObject
                 // shortening property labels if possible
                 $prop = $sprop = EasyRdf\RdfNamespace::shorten($prop);
             } else {
+                // EasyRdf requires full URIs to be in angle brackets
                 $sprop = "<$prop>";
             }
-            // EasyRdf requires full URIs to be in angle brackets
+            if ($whitelist && !in_array($prop, $whitelist)) {
+                // whitelist in use and this is not a whitelisted property, skipping
+                continue;
+            }
 
             if (in_array($prop, $this->MAPPING_PROPERTIES) && !in_array($prop, $this->DELETED_PROPERTIES)) {
                 $propres = new EasyRdf\Resource($prop, $this->graph);
@@ -430,23 +436,21 @@ class Concept extends VocabularyDataObject
                             }
 
                             if ($response) {
-                                $ret[$prop]->addValue(new ConceptMappingPropertyValue($this->model, $this->vocab, $response, $prop), $this->clang);
+                                $ret[$prop]->addValue(new ConceptMappingPropertyValue($this->model, $this->vocab, $response, $this->resource, $prop), $this->clang);
 
                                 $this->processExternalResource($response);
 
                                 continue;
                             }
                         }
-                        $ret[$prop]->addValue(new ConceptMappingPropertyValue($this->model, $this->vocab, $val, $prop, $this->clang), $this->clang);
+                        $ret[$prop]->addValue(new ConceptMappingPropertyValue($this->model, $this->vocab, $val, $this->resource, $prop, $this->clang), $this->clang);
                     }
                 }
             }
         }
 
         // sorting the properties to a order preferred in the Skosmos concept page.
-        $ret = $this->arbitrarySort($ret);
-
-        return $ret;
+        return $this->arbitrarySort($ret);
     }
 
     /**
@@ -500,21 +504,42 @@ class Concept extends VocabularyDataObject
                 // shortening property labels if possible
                 $prop = $sprop = EasyRdf\RdfNamespace::shorten($prop);
             } else {
+                // EasyRdf requires full URIs to be in angle brackets
                 $sprop = "<$prop>";
             }
-            // EasyRdf requires full URIs to be in angle brackets
 
             if (!in_array($prop, $this->DELETED_PROPERTIES) || ($this->isGroup() === false && $prop === 'skos:member')) {
                 // retrieve property label and super properties from the current vocabulary first
                 $propres = new EasyRdf\Resource($prop, $this->graph);
                 $proplabel = $propres->label($this->getEnvLang()) ? $propres->label($this->getEnvLang()) : $propres->label();
 
+                $prophelp = $propres->getLiteral('rdfs:comment|skos:definition', $this->getEnvLang());
+                if ($prophelp === null) {
+                    // try again without language restriction
+                    $prophelp = $propres->getLiteral('rdfs:comment|skos:definition');
+                }
+
+                // check if the property is one of the well-known properties for which we have a gettext translation
+                // if it is then we can skip the additional lookups in the default graph
+                $propkey = (substr($prop, 0, 5) == 'dc11:') ?
+                    str_replace('dc11:', 'dc:', $prop) : $prop;
+                $is_well_known = (gettext($propkey) != $propkey);
+
                 // if not found in current vocabulary, look up in the default graph to be able
                 // to read an ontology loaded in a separate graph
                 // note that this imply that the property has an rdf:type declared for the query to work
-                if(!$proplabel) {
+                if(!$is_well_known && !$proplabel) {
                     $envLangLabels = $this->model->getDefaultSparql()->queryLabel($longUri, $this->getEnvLang());
-                    $proplabel = ($envLangLabels)?$envLangLabels[$this->getEnvLang()]:$this->model->getDefaultSparql()->queryLabel($longUri, '')[''];
+                    
+                    $defaultPropLabel = $this->model->getDefaultSparql()->queryLabel($longUri, '');
+
+					if($envLangLabels) {
+						$proplabel = $envLangLabels[$this->getEnvLang()];
+                    } else {
+						if($defaultPropLabel) {
+							$proplabel = $defaultPropLabel[''];
+						}
+					}
                 }
 
                 // look for superproperties in the current graph
@@ -524,7 +549,7 @@ class Concept extends VocabularyDataObject
                 }
 
                 // also look up superprops in the default graph if not found in current vocabulary
-                if(!$superprops || empty($superprops)) {
+                if(!$is_well_known && (!$superprops || empty($superprops))) {
                     $superprops = $this->model->getDefaultSparql()->querySuperProperties($longUri);
                 }
 
@@ -533,7 +558,8 @@ class Concept extends VocabularyDataObject
                 if ($superprop) {
                     $superprop = EasyRdf\RdfNamespace::shorten($superprop) ? EasyRdf\RdfNamespace::shorten($superprop) : $superprop;
                 }
-                $propobj = new ConceptProperty($prop, $proplabel, $superprop);
+                $sort_by_notation = $this->vocab->getConfig()->sortByNotation();
+                $propobj = new ConceptProperty($prop, $proplabel, $prophelp, $superprop, $sort_by_notation);
 
                 if ($propobj->getLabel() !== null) {
                     // only display properties for which we have a label
@@ -551,8 +577,8 @@ class Concept extends VocabularyDataObject
                 // Iterating through every literal and adding these to the data object.
                 foreach ($this->resource->allLiterals($sprop) as $val) {
                     $literal = new ConceptPropertyValueLiteral($this->model, $this->vocab, $this->resource, $val, $prop);
-                    // only add literals when they match the content/hit language or have no language defined
-                    if (isset($ret[$prop]) && ($literal->getLang() === $this->clang || $literal->getLang() === null)) {
+                    // only add literals when they match the content/hit language or have no language defined OR when they are literals of a multilingual property
+                    if (isset($ret[$prop]) && ($literal->getLang() === $this->clang || $literal->getLang() === null) || $this->vocab->getConfig()->hasMultiLingualProperty($prop)) {
                         $ret[$prop]->addValue($literal);
                     }
 
@@ -576,13 +602,9 @@ class Concept extends VocabularyDataObject
                     }
 
                     if (isset($ret[$prop])) {
-                        // checking if the property value is not in the current vocabulary
-                        $exvoc = $this->model->guessVocabularyFromURI($val->getUri());
-                        if ($exvoc && $exvoc->getId() !== $this->vocab->getId()) {
-                            $ret[$prop]->addValue(new ConceptMappingPropertyValue($this->model, $this->vocab, $val, $prop, $this->clang), $this->clang);
-                            continue;
-                        }
-                        $ret[$prop]->addValue(new ConceptPropertyValue($this->model, $this->vocab, $val, $prop, $this->clang), $this->clang);
+                        // create a ConceptPropertyValue first, assuming the resource exists in current vocabulary
+                        $value = new ConceptPropertyValue($this->model, $this->vocab, $val, $prop, $this->clang);
+                        $ret[$prop]->addValue($value, $this->clang);
                     }
 
                 }
@@ -595,6 +617,22 @@ class Concept extends VocabularyDataObject
             }
         }
 
+        $groupPropObj = new ConceptProperty('skosmos:memberOf', null);
+        foreach ($this->getGroupProperties() as $propVals) {
+            foreach ($propVals as $propVal) {
+                $groupPropObj->addValue($propVal, $this->clang);
+            }
+        }
+        $ret['skosmos:memberOf'] = $groupPropObj;
+
+        $arrayPropObj = new ConceptProperty('skosmos:memberOfArray', null);
+        foreach ($this->getArrayProperties() as $propVals) {
+            foreach ($propVals as $propVal) {
+                $arrayPropObj->addValue($propVal, $this->clang);
+            }
+        }
+        $ret['skosmos:memberOfArray'] = $arrayPropObj;
+
         foreach ($ret as $key => $prop) {
             if (sizeof($prop->getValues()) === 0) {
                 unset($ret[$key]);
@@ -603,8 +641,7 @@ class Concept extends VocabularyDataObject
 
         $ret = $this->removeDuplicatePropertyValues($ret, $duplicates);
         // sorting the properties to the order preferred in the Skosmos concept page.
-        $ret = $this->arbitrarySort($ret);
-        return $ret;
+        return $this->arbitrarySort($ret);
     }
 
     /**
@@ -636,7 +673,42 @@ class Concept extends VocabularyDataObject
 
             }
         }
+        // handled separately: remove duplicate skos:prefLabel value (#854)
+        if (isset($duplicates["skos:prefLabel"])) {
+            unset($ret[$duplicates["skos:prefLabel"]]);
+        }
         return $ret;
+    }
+
+    /**
+     * @param $lang UI language
+     * @return String|null the translated label of skos:prefLabel subproperty, or null if not available
+     */
+    public function getPreferredSubpropertyLabelTranslation($lang) {
+        $prefLabelProp = $this->graph->resource("skos:prefLabel");
+        $subPrefLabelProps = $this->graph->resourcesMatching('rdfs:subPropertyOf', $prefLabelProp);
+        foreach ($subPrefLabelProps as $subPrefLabelProp) {
+            // return the first available translation
+            if ($subPrefLabelProp->label($lang)) return $subPrefLabelProp->label($lang);
+        }
+        return null;
+    }
+
+    /**
+     * @return DateTime|null the modified date, or null if not available
+     */
+    public function getModifiedDate()
+    {
+        // finding the modified properties
+        /** @var \EasyRdf\Resource|\EasyRdf\Literal|null $modifiedResource */
+        $modifiedResource = $this->resource->get('dc:modified');
+        if ($modifiedResource && $modifiedResource instanceof \EasyRdf\Literal\Date) {
+            return $modifiedResource->getValue();
+        }
+
+        // if the concept does not have a modified date, we look for it in its
+        // vocabulary
+        return $this->getVocab()->getModifiedDate();
     }
 
     /**
@@ -647,28 +719,24 @@ class Concept extends VocabularyDataObject
     {
         $ret = '';
         $created = '';
-        $modified = '';
         try {
             // finding the created properties
             if ($this->resource->get('dc:created')) {
                 $created = $this->resource->get('dc:created')->getValue();
             }
 
-            // finding the modified properties
-            if ($this->resource->get('dc:modified')) {
-                $modified = $this->resource->get('dc:modified')->getValue();
-            }
+            $modified = $this->getModifiedDate();
 
             // making a human readable string from the timestamps
             if ($created != '') {
-                $ret = gettext('skosmos:created') . ' ' . (Punic\Calendar::formatDate($created, 'short'));
+                $ret = gettext('skosmos:created') . ' ' . (Punic\Calendar::formatDate($created, 'short', $this->getEnvLang()));
             }
 
             if ($modified != '') {
                 if ($created != '') {
-                    $ret .= ', ' . gettext('skosmos:modified') . ' ' . (Punic\Calendar::formatDate($modified, 'short'));
+                    $ret .= ', ' . gettext('skosmos:modified') . ' ' . (Punic\Calendar::formatDate($modified, 'short', $this->getEnvLang()));
                 } else {
-                    $ret .= ' ' . ucfirst(gettext('skosmos:modified')) . ' ' . (Punic\Calendar::formatDate($modified, 'short'));
+                    $ret .= ' ' . ucfirst(gettext('skosmos:modified')) . ' ' . (Punic\Calendar::formatDate($modified, 'short', $this->getEnvLang()));
                 }
 
             }
@@ -723,83 +791,116 @@ class Concept extends VocabularyDataObject
      */
     public function getGroupProperties()
     {
-        return $this->getReverseResources(false);
+        return $this->getCollections(false);
     }
 
     /**
      * Gets the groups/arrays the concept belongs to.
      */
-    public function getReverseResources($includeArrays) {
+    private function getCollections($includeArrays) {
         $groups = array();
-        $reverseResources = $this->graph->resourcesMatching('skos:member', $this->resource);
-        if (isset($reverseResources)) {
+        $collections = $this->graph->resourcesMatching('skos:member', $this->resource);
+        if (isset($collections)) {
             $arrayClassURI = $this->vocab !== null ? $this->vocab->getConfig()->getArrayClassURI() : null;
             $arrayClass = $arrayClassURI !== null ? EasyRdf\RdfNamespace::shorten($arrayClassURI) : null;
             $superGroups = $this->resource->all('isothes:superGroup');
             $superGroupUris = array_map(function($obj) { return $obj->getUri(); }, $superGroups);
-            foreach ($reverseResources as $reverseResource) {
-                if (in_array($arrayClass, $reverseResource->types()) === $includeArrays) {
+            foreach ($collections as $collection) {
+                if (in_array($arrayClass, $collection->types()) === $includeArrays) {
                     // not adding the memberOf if the reverse resource is already covered by isothes:superGroup see issue #433
-                    if (in_array($reverseResource->getUri(), $superGroupUris)) {
+                    if (in_array($collection->getUri(), $superGroupUris)) {
                         continue;
                     }
-                    $property = in_array($arrayClass, $reverseResource->types()) ? "skosmos:memberOfArray" : "skosmos:memberOf";
-                    $collLabel = $reverseResource->label($this->clang) ? $reverseResource->label($this->clang) : $reverseResource->label();
+                    $property = in_array($arrayClass, $collection->types()) ? "skosmos:memberOfArray" : "skosmos:memberOf";
+                    $collLabel = $collection->label($this->clang) ? $collection->label($this->clang) : $collection->label();
                     if ($collLabel) {
                         $collLabel = $collLabel->getValue();
                     }
 
-                    $groups[$collLabel] = new ConceptPropertyValue($this->model, $this->vocab, $reverseResource, $property, $this->clang);
-                    ksort($groups);
-                    $super = $this->graph->resourcesMatching('skos:member', $reverseResource);
-                    while (isset($super) && !empty($super)) {
+                    $group = new ConceptPropertyValue($this->model, $this->vocab, $collection, $property, $this->clang);
+                    $groups[$collLabel] = array($group);
+
+                    $res = $collection;
+                    while($super = $this->graph->resourcesMatching('skos:member', $res)) {
                         foreach ($super as $res) {
                             $superprop = new ConceptPropertyValue($this->model, $this->vocab, $res, 'skosmos:memberOfSuper', $this->clang);
-                            array_unshift($groups, $superprop);
-                            $super = $this->graph->resourcesMatching('skos:member', $res);
+                            array_unshift($groups[$collLabel], $superprop);
                         }
                     }
                 }
             }
         }
+        uksort($groups, 'strcoll');
         return $groups;
     }
 
     public function getArrayProperties() {
-        return $this->getReverseResources(true);
+        return $this->getCollections(true);
     }
 
     /**
-     * Reads the literal language code and gets a name for it from Punic or alternatively
+     * Given a language code, gets its name in UI language via Punic or alternatively
      * tries to search for a gettext translation.
-     * @param EasyRdf\Literal $lit
+     * @param string $langCode
      * @return string e.g. 'English'
      */
-    private function literalLanguageToString($lit) {
-        // using empty string as the language literal when there is no langcode set
+    private function langToString($langCode) {
+        // using empty string as the language name when there is no langcode set
         $langName = '';
-        if ($lit->getLang() !== null) {
-            $langName = Punic\Language::getName($lit->getLang(), $this->getEnvLang()) !== $lit->getLang() ? Punic\Language::getName($lit->getLang(), $this->getEnvLang()) : gettext($lit->getLang());
+        if (!empty($langCode)) {
+            $langName = Punic\Language::getName($langCode, $this->getEnvLang()) !== $langCode ? Punic\Language::getName($langCode, $this->getEnvLang()) : gettext($langCode);
         }
         return $langName;
     }
 
     /**
-     * Gets the values for the property in question in all other languages than the ui language.
+     * Gets the values of a property in all other languages than in the current language
+     * and places them in a [langCode][userDefinedKey] array.
+     * @param string $prop The property for which the values are looked upon to
+     * @param string $key User-defined key for accessing the values
+     * @return array LangCode-based multidimensional array ([string][string][ConceptPropertyValueLiteral]) or empty array if no values
      */
-    public function getForeignLabels()
-    {
-        $prefLabels = $this->resource->allLiterals('skos:prefLabel');
-        $labels = array_merge($prefLabels, $this->resource->allLiterals('skos:altLabel'));
+    private function getForeignLabelList($prop, $key) {
         $ret = array();
+        $labels = $this->resource->allLiterals($prop);
+
         foreach ($labels as $lit) {
             // filtering away subsets of the current language eg. en vs en-GB
             if ($lit->getLang() != $this->clang && strpos($lit->getLang(), $this->getEnvLang() . '-') !== 0) {
-                $prop = in_array($lit, $prefLabels) ? 'skos:prefLabel' : 'skos:altLabel';
-                $ret[$this->literalLanguageToString($lit)][] = new ConceptPropertyValueLiteral($this->model, $this->vocab, $this->resource, $lit, $prop);
+                $langCode = $lit->getLang() ? $lit->getLang() : '';
+                $ret[$langCode][$key][] = new ConceptPropertyValueLiteral($this->model, $this->vocab, $this->resource, $lit, $prop);
             }
         }
-        ksort($ret);
+        return $ret;
+    }
+
+    /**
+     * Gets the values of skos:prefLabel and skos:altLabel in all other languages than in the current language.
+     * @return array Language-based multidimensional sorted array ([string][string][ConceptPropertyValueLiteral]) or empty array if no values
+     */
+    public function getForeignLabels()
+    {
+        $prefLabels = $this->getForeignLabelList('skos:prefLabel', 'prefLabel');
+        $altLabels = $this->getForeignLabelList('skos:altLabel', 'altLabel');
+        $ret = array_merge_recursive($prefLabels, $altLabels);
+
+        $langArray = array_keys($ret);
+        foreach ($langArray as $lang) {
+            $coll = collator_create($lang);
+            if (isset($ret[$lang]['prefLabel']))
+            {
+                $coll->sort($ret[$lang]['prefLabel'], Collator::SORT_STRING);
+            }
+            if (isset($ret[$lang]['altLabel']))
+            {
+                $coll->sort($ret[$lang]['altLabel'], Collator::SORT_STRING);
+            }
+            if ($lang !== '') {
+                $ret[$this->langToString($lang)] = $ret[$lang];
+                unset($ret[$lang]);
+            }
+        }
+        uksort($ret, 'strcoll');
         return $ret;
     }
 
@@ -863,8 +964,11 @@ class Concept extends VocabularyDataObject
             }
         }
         $compactJsonLD = \ML\JsonLD\JsonLD::compact($this->graph->serialise('jsonld'), json_encode($context));
-        $results = \ML\JsonLD\JsonLD::toString($compactJsonLD);
+        return \ML\JsonLD\JsonLD::toString($compactJsonLD);
+    }
 
-        return $results;
+    public function isUseModifiedDate()
+    {
+        return $this->getVocab()->isUseModifiedDate();
     }
 }

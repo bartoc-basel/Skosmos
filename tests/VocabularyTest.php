@@ -1,16 +1,18 @@
 <?php
 
-require_once('model/Model.php');
-
 class VocabularyTest extends \PHPUnit\Framework\TestCase
 {
-
+  /**
+   * @var Model
+   */
   private $model;
 
   protected function setUp() {
+    putenv("LANGUAGE=en_GB.utf8");
     putenv("LC_ALL=en_GB.utf8");
     setlocale(LC_ALL, 'en_GB.utf8');
-    $this->model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $this->model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
+    $this->jenamodel = new Model(new GlobalConfig('/../tests/jenatestconfig.ttl'));
   }
 
   /**
@@ -37,7 +39,7 @@ class VocabularyTest extends \PHPUnit\Framework\TestCase
   public function testGetEndpoint() {
     $vocab = $this->model->getVocabulary('testdiff');
     $endpoint = $vocab->getEndpoint();
-    $this->assertEquals('http://localhost:3030/ds/sparql', $endpoint);
+    $this->assertEquals('http://localhost:13030/skosmos-test/sparql', $endpoint);
   }
 
   /**
@@ -150,7 +152,7 @@ class VocabularyTest extends \PHPUnit\Framework\TestCase
   public function testGetStatistics() {
     $vocab = $this->model->getVocabulary('test');
     $stats = $vocab->getStatistics();
-    $this->assertEquals(16, $stats['http://www.w3.org/2004/02/skos/core#Concept']['count']);
+    $this->assertEquals(17, $stats['http://www.w3.org/2004/02/skos/core#Concept']['count']);
   }
 
   /**
@@ -262,6 +264,92 @@ class VocabularyTest extends \PHPUnit\Framework\TestCase
 
   /**
    * @covers Vocabulary::searchConceptsAlphabetical
+   * @covers GenericSparql::queryConceptsAlphabetical
+   * @covers GenericSparql::generateAlphabeticalListQuery
+   * @covers GenericSparql::transformAlphabeticalListResults
+   */
+  public function testSearchConceptsAlphabeticalQualifiedNotationGeneric() {
+    $vocab = $this->model->getVocabulary('test-qualified-notation');
+
+    $concepts = $vocab->searchConceptsAlphabetical('A', null, null, 'en');
+    $this->assertCount(3, $concepts);
+    $this->assertEquals('A', $concepts[0]['qualifier']);
+    $this->assertEquals('qn1b', $concepts[1]['localname']);
+
+    $concepts = $vocab->searchConceptsAlphabetical('B', null, null, 'en');
+    $this->assertCount(4, $concepts);
+    $this->assertEquals('C', $concepts[3]['qualifier']);
+  }
+
+  /**
+   * @covers Vocabulary::searchConceptsAlphabetical
+   * @covers JenaTextSparql::queryConceptsAlphabetical
+   * @covers JenaTextSparql::generateAlphabeticalListQuery
+   * @covers JenaTextSparql::transformAlphabeticalListResults
+   */
+  public function testSearchConceptsAlphabeticalQualifiedNotation() {
+    $vocab = $this->jenamodel->getVocabulary('test-qualified-notation');
+
+    $concepts = $vocab->searchConceptsAlphabetical('A', null, null, 'en');
+    $this->assertCount(3, $concepts);
+    $this->assertEquals('A', $concepts[0]['qualifier']);
+    $this->assertEquals('qn1b', $concepts[1]['localname']);
+
+    $concepts = $vocab->searchConceptsAlphabetical('B', null, null, 'en');
+    $this->assertCount(4, $concepts);
+    $this->assertEquals('C', $concepts[3]['qualifier']);
+  }
+
+  /**
+   * @covers Vocabulary::searchConceptsAlphabetical
+   * @covers GenericSparql::queryConceptsAlphabetical
+   * @covers GenericSparql::generateAlphabeticalListQuery
+   * @covers GenericSparql::transformAlphabeticalListResults
+   */
+  public function testSearchConceptsAlphabeticalQualifiedBroaderGeneric() {
+    $vocab = $this->model->getVocabulary('test-qualified-broader');
+
+    $concepts = $vocab->searchConceptsAlphabetical('A', null, null, 'en');
+    $this->assertCount(1, $concepts);
+    $this->assertArrayNotHasKey('qualifier', $concepts[0]);
+    $this->assertEquals('qb1', $concepts[0]['localname']);
+
+    $concepts = $vocab->searchConceptsAlphabetical('B', null, null, 'en');
+    $this->assertCount(1, $concepts);
+    $this->assertEquals('qb1', $concepts[0]['qualifier']);
+
+    $concepts = $vocab->searchConceptsAlphabetical('C', null, null, 'en');
+    $this->assertCount(2, $concepts);
+    $this->assertEquals('qb1', $concepts[0]['qualifier']);
+    $this->assertEquals('qb2', $concepts[1]['qualifier']);
+  }
+
+  /**
+   * @covers Vocabulary::searchConceptsAlphabetical
+   * @covers JenaTextSparql::queryConceptsAlphabetical
+   * @covers JenaTextSparql::generateAlphabeticalListQuery
+   * @covers JenaTextSparql::transformAlphabeticalListResults
+   */
+  public function testSearchConceptsAlphabeticalQualifiedBroader() {
+    $vocab = $this->jenamodel->getVocabulary('test-qualified-broader');
+
+    $concepts = $vocab->searchConceptsAlphabetical('A', null, null, 'en');
+    $this->assertCount(1, $concepts);
+    $this->assertArrayNotHasKey('qualifier', $concepts[0]);
+    $this->assertEquals('qb1', $concepts[0]['localname']);
+
+    $concepts = $vocab->searchConceptsAlphabetical('B', null, null, 'en');
+    $this->assertCount(1, $concepts);
+    $this->assertEquals('qb1', $concepts[0]['qualifier']);
+
+    $concepts = $vocab->searchConceptsAlphabetical('C', null, null, 'en');
+    $this->assertCount(2, $concepts);
+    $this->assertEquals('qb1', $concepts[0]['qualifier']);
+    $this->assertEquals('qb2', $concepts[1]['qualifier']);
+  }
+
+  /**
+   * @covers Vocabulary::searchConceptsAlphabetical
    */
   public function testSearchConceptsAlphabeticalDigits() {
     $vocab = $this->model->getVocabulary('groups');
@@ -295,7 +383,7 @@ class VocabularyTest extends \PHPUnit\Framework\TestCase
    * @covers Vocabulary::getCrumbs
    */
   public function testGetBreadCrumbs() {
-    $model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $resource = $this->getMockBuilder('EasyRdf\Resource')->disableOriginalConstructor()->getMock();
     $vocabstub = $this->getMockBuilder('Vocabulary')->setMethods(array('getConceptTransitiveBroaders'))->setConstructorArgs(array($model, $resource))->getMock();
     $vocabstub->method('getConceptTransitiveBroaders')->willReturn(array ( 'http://www.yso.fi/onto/yso/p4762' => array ( 'label' => 'objects', ), 'http://www.yso.fi/onto/yso/p1674' => array ( 'label' => 'physical whole', 'direct' => array ( 0 => 'http://www.yso.fi/onto/yso/p4762', ), ), 'http://www.yso.fi/onto/yso/p14606' => array ( 'label' => 'layers', 'direct' => array ( 0 => 'http://www.yso.fi/onto/yso/p1674', ), ), ));
@@ -310,7 +398,7 @@ class VocabularyTest extends \PHPUnit\Framework\TestCase
    * @covers Vocabulary::getCrumbs
    */
   public function testGetBreadCrumbsShortening() {
-    $model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $resource = $this->getMockBuilder('EasyRdf\Resource')->disableOriginalConstructor()->getMock();
     $vocabstub = $this->getMockBuilder('Vocabulary')->setMethods(array('getConceptTransitiveBroaders'))->setConstructorArgs(array($model, $resource))->getMock();
     $vocabstub->method('getConceptTransitiveBroaders')->willReturn(array ( 'http://www.yso.fi/onto/yso/p4762' => array ( 'label' => 'objects', ), 'http://www.yso.fi/onto/yso/p13871' => array ( 'label' => 'thai language', 'direct' => array ( 0 => 'http://www.yso.fi/onto/yso/p10834', ), ), 'http://www.yso.fi/onto/yso/p556' => array ( 'label' => 'languages', 'direct' => array ( 0 => 'http://www.yso.fi/onto/yso/p2881', ), ), 'http://www.yso.fi/onto/yso/p8965' => array ( 'label' => 'Sino-Tibetan languages', 'direct' => array ( 0 => 'http://www.yso.fi/onto/yso/p556', ), ), 'http://www.yso.fi/onto/yso/p3358' => array ( 'label' => 'systems', 'direct' => array ( 0 => 'http://www.yso.fi/onto/yso/p4762', ), ), 'http://www.yso.fi/onto/yso/p10834' => array ( 'label' => 'Tai languages', 'direct' => array ( 0 => 'http://www.yso.fi/onto/yso/p8965', ), ), 'http://www.yso.fi/onto/yso/p2881' => array ( 'label' => 'cultural systems', 'direct' => array ( 0 => 'http://www.yso.fi/onto/yso/p3358', ), ), ) );
@@ -324,7 +412,7 @@ class VocabularyTest extends \PHPUnit\Framework\TestCase
    * @covers Vocabulary::getCrumbs
    */
   public function testGetBreadCrumbsCycle() {
-    $model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $vocab = $model->getVocabulary('cycle');
     $result = $vocab->getBreadCrumbs('en', 'http://www.skosmos.skos/cycle/ta4');
     foreach ($result['breadcrumbs'][0] as $crumb)
@@ -345,10 +433,9 @@ class VocabularyTest extends \PHPUnit\Framework\TestCase
    */
   public function testGetChangeList() {
     $vocab = $this->model->getVocabulary('changes');
-    $months = $vocab->getChangeList('dc11:created','en', 'en', 0);
-    $expected = array ('hurr durr' => array ('uri' => 'http://www.skosmos.skos/changes/d3', 'prefLabel' => 'Hurr Durr', 'date' => DateTime::__set_state(array('date' => '2010-02-12 10:26:39.000000', 'timezone_type' => 3, 'timezone' => 'UTC')), 'datestring' => 'Feb 12, 2010'), 'second date' => array ('uri' => 'http://www.skosmos.skos/changes/d2', 'prefLabel' => 'Second date', 'date' => DateTime::__set_state(array('date' => '2010-02-12 15:26:39.000000', 'timezone_type' => 3, 'timezone' => 'UTC')), 'datestring' => 'Feb 12, 2010'));
-    $this->assertEquals(array('December 2011', 'February 2010', 'January 2000'), array_keys($months));
-    $this->assertEquals($expected, $months['February 2010']);
+    $changeList = $vocab->getChangeList('dc:created','en', 0, 5);
+    $expected = array ('uri' => 'http://www.skosmos.skos/changes/d3', 'prefLabel' => 'Hurr Durr', 'date' => DateTime::__set_state(array('date' => '2010-02-12 10:26:39.000000', 'timezone_type' => 3, 'timezone' => 'UTC')));
+    $this->assertEquals($expected, $changeList[1]);
   }
 
   /**
@@ -435,5 +522,48 @@ class VocabularyTest extends \PHPUnit\Framework\TestCase
     $this->assertEquals(1, sizeof($concept));
   }
 
+  /**
+   * @covers Vocabulary::getConceptScheme
+   */
+  public function testGetConceptScheme() {
+    $vocab = $this->model->getVocabulary('http304');
+    $conceptSchemeUri = $vocab->getDefaultConceptScheme();
+    $conceptScheme = $vocab->getConceptScheme($conceptSchemeUri);
+    $this->assertEquals(
+      "Test Main Concept Scheme",
+      $conceptScheme->getLiteral($conceptSchemeUri,"skos:prefLabel")
+    );
+  }
+
+  /**
+   * @covers Vocabulary::getModifiedDate
+   */
+  public function testGetModifiedDate() {
+    $vocab = $this->model->getVocabulary('http304');
+    $this->assertEquals(
+      new DateTime("2018-12-13T06:28:14+00:00"),
+      $vocab->getModifiedDate()
+    );
+  }
+
+  /**
+   * @covers Vocabulary::getModifiedDate
+   */
+  public function testGetModifiedDateNoConceptScheme() {
+    $vocab = $this->model->getVocabulary('dates');
+    $this->assertNull(
+      $vocab->getModifiedDate()
+    );
+  }
+
+  /**
+   * @covers Vocabulary::getModifiedDate
+   */
+  public function testGetModifiedDateNoTimestampOnConceptScheme() {
+    $vocab = $this->model->getVocabulary('groups');
+    $this->assertNull(
+      $vocab->getModifiedDate()
+    );
+  }
 }
 

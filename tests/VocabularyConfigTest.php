@@ -2,13 +2,19 @@
 
 class VocabularyConfigTest extends PHPUnit\Framework\TestCase
 {
-
+  /** @var Model */
   private $model;
 
+  /**
+   * @covers VocabularyConfig::getConfig
+   * @throws Exception
+   */
   protected function setUp() {
+    putenv("LANGUAGE=en_GB.utf8");
     putenv("LC_ALL=en_GB.utf8");
     setlocale(LC_ALL, 'en_GB.utf8');
-    $this->model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $this->model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
+    $this->assertNotNull($this->model->getVocabulary('test')->getConfig()->getPlugins(), "The PluginRegister of the model was not initialized!");
   }
 
   /**
@@ -181,6 +187,27 @@ class VocabularyConfigTest extends PHPUnit\Framework\TestCase
   }
 
   /**
+   * @covers VocabularyConfig::getDataURLs
+   */
+  public function testGetDataURLsMarc() {
+    $vocab = $this->model->getVocabulary('test-marc');
+    $url = $vocab->getConfig()->getDataURLs();
+    $marcArray = $url['application/marcxml+xml'];
+    $this->assertEquals( ( in_array('http://skosmos.skos/dump/test/marc-fi.mrcx', $marcArray) &&
+                           in_array('http://skosmos.skos/dump/test/marc-sv.mrcx', $marcArray) ), true);
+  }
+
+  /**
+   * @covers VocabularyConfig::getDataURLs
+   * @expectedException PHPUnit\Framework\Error\Warning
+   */
+  public function testGetDataURLsMarcNotDefined() {
+    $vocab = $this->model->getVocabulary('marc-undefined');
+    $url = $vocab->getConfig()->getDataURLs();
+    $this->assertEquals(array(), $url);
+  }
+
+  /**
    * @covers VocabularyConfig::getGroupClassURI
    */
   public function testGetGroupClassURI() {
@@ -296,6 +323,24 @@ class VocabularyConfigTest extends PHPUnit\Framework\TestCase
   }
 
   /**
+   * @covers VocabularyConfig::searchByNotation
+   * @covers VocabularyConfig::getBoolean
+   */
+  public function testShowSearchByNotationDefaultValue() {
+      $vocab = $this->model->getVocabulary('test');
+      $this->assertEquals(false, $vocab->getConfig()->searchByNotation());
+  }
+
+  /**
+   * @covers VocabularyConfig::searchByNotation
+   * @covers VocabularyConfig::getBoolean
+   */
+  public function testShowSearchByNotationValue() {
+      $vocab = $this->model->getVocabulary('testNotation');
+      $this->assertEquals(true, $vocab->getConfig()->searchByNotation());
+  }
+
+  /**
    * @covers VocabularyConfig::showConceptSchemesInHierarchy
    * @covers VocabularyConfig::getBoolean
    */
@@ -379,4 +424,134 @@ class VocabularyConfigTest extends PHPUnit\Framework\TestCase
     $this->assertEquals(array('en', 'fr', 'de', 'sv'), $vocab->getConfig()->getLanguageOrder('en'));
     $this->assertEquals(array('fi', 'fr', 'de', 'sv', 'en'), $vocab->getConfig()->getLanguageOrder('fi'));
   }
+
+  /**
+   * @covers VocabularyConfig::showAlphabeticalIndex
+   */
+  public function testShowAlphabeticalIndex() {
+    $vocab = $this->model->getVocabulary('testdiff');
+    $this->assertTrue($vocab->getConfig()->showAlphabeticalIndex());
+  }
+
+  /**
+   * @covers VocabularyConfig::showNotation
+   */
+  public function testShowNotation() {
+    $vocab = $this->model->getVocabulary('test');
+    $this->assertTrue($vocab->getConfig()->showNotation());
+  }
+
+  /**
+   * @covers VocabularyConfig::getId
+   */
+  public function testGetId() {
+    $vocab = $this->model->getVocabulary('testdiff');
+    $this->assertEquals('testdiff' , $vocab->getConfig()->getId());
+  }
+
+  /**
+   * @covers VocabularyConfig::getMainConceptSchemeURI
+   */
+  public function testGetMainConceptSchemeURI() {
+    $vocab = $this->model->getVocabulary('testdiff');
+    $this->assertEquals('http://www.skosmos.skos/testdiff#conceptscheme' , $vocab->getConfig()->getMainConceptSchemeURI());
+    $vocab = $this->model->getVocabulary('test');
+    $this->assertNull($vocab->getConfig()->getMainConceptSchemeURI());
+  }
+
+  /**
+   * @covers VocabularyConfig::getExtProperties
+   */
+  public function testGetExtProperties() {
+    $vocab = $this->model->getVocabulary('cbd');
+    $this->assertEquals(4 , count($vocab->getConfig()->getExtProperties()));
+  }
+
+  /**
+   * @covers VocabularyConfig::getMarcSourceCode
+   */
+  public function testGetMarcSourceCode() {
+    $vocab = $this->model->getVocabulary('test');
+    $this->assertEquals("ysa/fi" , $vocab->getConfig()->getMarcSourceCode("fi"));
+  }
+
+ /**
+   * @covers VocabularyConfig::getMarcSourceCode
+   */
+  public function testGetMarcSourceCodeWithoutLang() {
+    $vocab = $this->model->getVocabulary('multiple-schemes');
+    $this->assertEquals("ysa/gen" , $vocab->getConfig()->getMarcSourceCode("fi"));
+  }
+
+  /**
+   * @covers VocabularyConfig::isUseModifiedDate
+   */
+  public function testGetVocabularyUseModifiedDate() {
+    $vocab = $this->model->getVocabulary('http304');
+    $this->assertEquals(true , $vocab->getConfig()->isUseModifiedDate());
+    $vocab = $this->model->getVocabulary('http304disabled');
+    $this->assertEquals(false , $vocab->getConfig()->isUseModifiedDate());
+  }
+
+  /**
+   * @covers VocabularyConfig::getPluginParameters
+   */
+  public function testGetPluginParameters() {
+    $vocab = $this->model->getVocabulary('paramPluginTest');
+    $params = $vocab->getConfig()->getPluginParameters();
+    $this->assertEquals(json_encode(array('imaginaryPlugin' => array('poem_fi' => "Roses are red", 'poem' => "Violets are blue", 'color' => "#800000")),true), $params);
+  }
+
+  /**
+   * @covers VocabularyConfig::getPropertyOrder
+   */
+  public function testGetPropertyOrderNotSet() {
+    $vocab = $this->model->getVocabulary('test');
+    $params = $vocab->getConfig()->getPropertyOrder();
+    $this->assertEquals(VocabularyConfig::DEFAULT_PROPERTY_ORDER, $params);
+  }
+
+  /**
+   * @covers VocabularyConfig::getPropertyOrder
+   */
+  public function testGetPropertyOrderDefault() {
+    $vocab = $this->model->getVocabulary('testDefaultPropertyOrder');
+    $params = $vocab->getConfig()->getPropertyOrder();
+    $this->assertEquals(VocabularyConfig::DEFAULT_PROPERTY_ORDER, $params);
+  }
+
+  /**
+   * @covers VocabularyConfig::getPropertyOrder
+   * @expectedException PHPUnit\Framework\Error\Error
+   */
+  public function testGetPropertyOrderUnknown() {
+    $vocab = $this->model->getVocabulary('testUnknownPropertyOrder');
+    $params = $vocab->getConfig()->getPropertyOrder();
+    $this->assertEquals(VocabularyConfig::DEFAULT_PROPERTY_ORDER, $params);
+  }
+
+  /**
+   * @covers VocabularyConfig::getPropertyOrder
+   */
+  public function testGetPropertyOrderISO() {
+    $vocab = $this->model->getVocabulary('testISOPropertyOrder');
+    $params = $vocab->getConfig()->getPropertyOrder();
+    $this->assertEquals(VocabularyConfig::ISO25964_PROPERTY_ORDER, $params);
+  }
+
+
+  /**
+   * @covers VocabularyConfig::getPropertyOrder
+   */
+  public function testGetPropertyOrderCustom() {
+    $vocab = $this->model->getVocabulary('testCustomPropertyOrder');
+    $params = $vocab->getConfig()->getPropertyOrder();
+
+    $order = array('rdf:type', 'skos:definition', 'skos:broader',
+    'skos:narrower', 'skos:related', 'skos:altLabel', 'skos:note',
+    'skos:scopeNote', 'skos:historyNote', 'skos:prefLabel');
+
+    $this->assertEquals($order, $params);
+  }
+
 }

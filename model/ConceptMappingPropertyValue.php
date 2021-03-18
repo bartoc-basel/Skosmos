@@ -1,5 +1,7 @@
 <?php
 
+use EasyRdf\Resource;
+
 /**
  * Class for handling concept property values.
  */
@@ -7,12 +9,24 @@ class ConceptMappingPropertyValue extends VocabularyDataObject
 {
     /** property type */
     private $type;
+    private $source;
     private $clang;
     private $labelcache;
 
-    public function __construct($model, $vocab, $resource, $prop, $clang = '')
+    /**
+     * ConceptMappingPropertyValue constructor.
+     *
+     * @param Model $model
+     * @param Vocabulary $vocab  Target vocabulary
+     * @param Resource $target   Target concept resource
+     * @param Resource $source   Source concept resource
+     * @param string $prop       Mapping property
+     * @param ?string $clang     Preferred label language (nullable)
+     */
+    public function __construct(Model $model, Vocabulary $vocab, Resource $target, Resource $source, string $prop, $clang = '')
     {
-        parent::__construct($model, $vocab, $resource);
+        parent::__construct($model, $vocab, $target);
+        $this->source = $source;
         $this->type = $prop;
         $this->clang = $clang;
         $this->labelcache = array();
@@ -22,7 +36,7 @@ class ConceptMappingPropertyValue extends VocabularyDataObject
     {
         $label = $this->getLabel();
         $notation = $this->getNotation();
-        return $notation . $label;
+        return ltrim($notation . ' ') . $label;
     }
 
     public function getType()
@@ -30,7 +44,7 @@ class ConceptMappingPropertyValue extends VocabularyDataObject
         return $this->type;
     }
 
-    public function getLabel($lang = '')
+    public function getLabel($lang = '', $queryExVocabs = true)
     {
         if (isset($this->labelcache[$lang])) {
             return $this->labelcache[$lang];
@@ -41,7 +55,7 @@ class ConceptMappingPropertyValue extends VocabularyDataObject
         return $label;
     }
 
-    private function queryLabel($lang = '')
+    private function queryLabel($lang = '', $queryExVocabs = true)
     {
         if ($this->clang) {
             $lang = $this->clang;
@@ -54,7 +68,7 @@ class ConceptMappingPropertyValue extends VocabularyDataObject
         }
 
         // if multiple vocabularies are found, the following method will return in priority the current vocabulary of the mapping
-        $exvocab = $this->model->guessVocabularyFromURI($this->resource->getUri(), $this->vocab->getId());
+        $exvocab = $queryExVocabs ? $this->model->guessVocabularyFromURI($this->resource->getUri(), $this->vocab->getId()) : null;
 
         // if the resource is from another vocabulary known by the skosmos instance
         if ($exvocab) {
@@ -65,8 +79,7 @@ class ConceptMappingPropertyValue extends VocabularyDataObject
         }
 
         // using URI as label if nothing else has been found.
-        $label = $this->resource->shorten() ? $this->resource->shorten() : $this->resource->getUri();
-        return $label;
+        return $this->resource->shorten() ? $this->resource->shorten() : $this->resource->getUri();
     }
 
     private function getResourceLabel($res, $lang = '') {
@@ -94,8 +107,7 @@ class ConceptMappingPropertyValue extends VocabularyDataObject
 
     public function getExVocab()
     {
-        $exvocab = $this->model->guessVocabularyFromURI($this->getUri(), $this->vocab->getId());
-        return $exvocab;
+        return $this->model->guessVocabularyFromURI($this->getUri(), $this->vocab->getId());
     }
 
     public function getVocab()
@@ -123,7 +135,6 @@ class ConceptMappingPropertyValue extends VocabularyDataObject
             if ($schemeResource) {
                 $schemaName = $this->getResourceLabel($schemeResource);
                 if ($schemaName) {
-                    //var_dump($schemaName);
                     return $schemaName;
                 }
             }
@@ -146,6 +157,93 @@ class ConceptMappingPropertyValue extends VocabularyDataObject
             return $this->getExternalNotation($exvocab, $this->getUri());
         }
         return null;
+    }
+
+    /**
+     * Return the mapping as a JSKOS-compatible array.
+     * @return array
+     */
+    public function asJskos($queryExVocabs = true, $lang = null, $hrefLink = null)
+    {
+        $propertyLabel = $this->getLabel($lang, $queryExVocabs);
+        $propertyLang = $lang;
+        if (!is_string($propertyLabel)) {
+            $propertyLang = $propertyLabel->getLang();
+            $propertyLabel = $propertyLabel->getValue();
+        }
+        $ret = [
+            // JSKOS
+            'uri' => $this->source->getUri(),
+            'notation' => $this->getNotation(),
+            'type' => [$this->type],
+            'prefLabel' => $propertyLabel,
+            'from' => [
+                'memberSet' => [
+                    [
+                        'uri' => (string) $this->source->getUri(),
+                    ]
+                ]
+            ],
+            'to' => [
+                'memberSet' => [
+                    [
+                        'uri' => (string) $this->getUri()
+                    ]
+                ]
+            ],
+            // EXTRA
+            'hrefLink' => $hrefLink, // link to resource as displayed in the UI
+            'lang' => $propertyLang, // TBD: could it be part of the prefLabel?
+            'vocabName' => (string) $this->getVocabName(), // vocabulary as displayed in the UI
+            'typeLabel' => gettext($this->type), // a text used in the UI instead of, for example, skos:closeMatch
+        ];
+
+        $helpprop = $this->type . "_help";
+        // see if we have a translation for the property help text
+        $help = gettext($helpprop);
+        if ($help != $helpprop) {
+            $ret['description'] = $help;
+        }
+
+        $fromScheme = $this->vocab->getDefaultConceptScheme();
+        if (isset($fromScheme)) {
+            $ret['fromScheme'] = [
+                'uri' => (string) $fromScheme,
+            ];
+        }
+
+        $exvocab = $this->getExvocab();
+        if (isset($exvocab)) {
+            $ret['toScheme'] = [
+                'uri' => (string) $exvocab->getDefaultConceptScheme(),
+            ];
+        }
+
+        $notation = $this->getNotation();
+        if (isset($notation)) {
+            $ret['to']['memberSet'][0]['notation'] = (string) $notation;
+        }
+
+        $label = $this->getLabel($lang, $queryExVocabs);
+        if (isset($label)) {
+            if (is_string($label)) {
+                list($labelLang, $labelValue) = ['', $label];
+            } else {
+                list($labelLang, $labelValue) = [$label->getLang(), $label->getValue()];
+            }
+            // set the language of the preferred label to be whatever returned
+            $ret['lang'] = $labelLang;
+
+            if ($labelValue != $this->getUri()) {
+                // The `queryLabel()` method above will fallback to returning the URI
+                // if no label was found. We don't want that here.
+                $ret['to']['memberSet'][0]['prefLabel'] = [
+                    $labelLang => $labelValue,
+                ];
+            }
+        }
+
+        return $ret;
     }
 
 }

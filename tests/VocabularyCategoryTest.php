@@ -6,9 +6,10 @@ class VocabularyCategoryTest extends PHPUnit\Framework\TestCase
   private $mockres;
 
   protected function setUp() {
+    putenv("LANGUAGE=en_GB.utf8");
     putenv("LC_ALL=en_GB.utf8");
     setlocale(LC_ALL, 'en_GB.utf8');
-    $this->model = new Model(new GlobalConfig('/../tests/testconfig.inc'));
+    $this->model = new Model(new GlobalConfig('/../tests/testconfig.ttl'));
     $this->mockres = $this->getMockBuilder('EasyRdf\Resource')->disableOriginalConstructor()->getMock();
     $this->mockres->method('localName')->will($this->returnValue('local name'));
   }
@@ -19,7 +20,8 @@ class VocabularyCategoryTest extends PHPUnit\Framework\TestCase
    * @expectedExceptionMessage Invalid constructor parameter given to DataObject.
    */
   public function testConstructorWithInvalidParameters() {
-    new VocabularyCategory('invalid', 'invalid');
+    $vcat = new VocabularyCategory('invalid', 'invalid');
+    $this->assertNotNull($vcat);
   }
 
   /**
